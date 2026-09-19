@@ -134,15 +134,15 @@ reach the browser.
 
 ## Roadmap to submission
 
-| Phase | Package(s)     | Scope                                            | Status                          |
-| ----- | -------------- | ------------------------------------------------ | ------------------------------- |
-| 0     | PKG-00         | Repository, tooling, CI, guardrails              | ✅ done                         |
-| 1     | PKG-01…PKG-04  | Soroban financial core                           | ✅ done                         |
-| 2     | PKG-05, PKG-06 | Testnet deployment, Stellar Wallets Kit          | PKG-05 done; PKG-06 in progress |
-| 3     | PKG-07         | Anchor / local payments (TRY ↔ USDC)             | ⬜                              |
-| 4     | PKG-08         | API, PostgreSQL read models, Soroban indexer     | ⬜                              |
-| 5     | PKG-09…PKG-11  | Product UI, Trade Lab, public traction dashboard | ⬜                              |
-| 6     | PKG-12         | Hardening, documentation, demo, submission       | ⬜                              |
+| Phase | Package(s)     | Scope                                            | Status  |
+| ----- | -------------- | ------------------------------------------------ | ------- |
+| 0     | PKG-00         | Repository, tooling, CI, guardrails              | ✅ done |
+| 1     | PKG-01…PKG-04  | Soroban financial core                           | ✅ done |
+| 2     | PKG-05, PKG-06 | Testnet deployment, Stellar Wallets Kit          | ✅ done |
+| 3     | PKG-07         | Anchor / local payments (TRY ↔ USDC)             | ⬜      |
+| 4     | PKG-08         | API, PostgreSQL read models, Soroban indexer     | ⬜      |
+| 5     | PKG-09…PKG-11  | Product UI, Trade Lab, public traction dashboard | ⬜      |
+| 6     | PKG-12         | Hardening, documentation, demo, submission       | ⬜      |
 
 ## Documentation
 
@@ -174,6 +174,12 @@ browser with Freighter. The page checks the actual wallet network and approved U
 trustline. A connected buyer can create an empty Testnet order using the generated
 MilvanceCore bindings; Freighter signs it, and the page reads the confirmed order
 back from the contract. See [wallet layer guide](docs/WALLET_LAYER.md).
+
+**PKG-06 live proof:** A wallet-authorized `create_order` transaction succeeded on
+Stellar Testnet in ledger **4,761,475**. The contract emitted `order_created` for
+**order #1**, and a separate contract read returned that order with the transaction's
+buyer and supplier and the approved USDC SAC. View the
+[public transaction](https://stellar.expert/explorer/testnet/tx/5fafed67546e55aa79f441a5fdd5932bd4038bd05e3cc3af4c820e522c5783ee).
 
 ## Built for
 

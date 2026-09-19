@@ -6,6 +6,23 @@ is stored in browser local storage. Freighter keeps signing authority, and the w
 app sends signed XDR directly to Stellar RPC through the generated MilvanceCore
 client. The backend is not in this path.
 
+## Verified live Testnet proof
+
+- Transaction: [`5fafed67546e55aa79f441a5fdd5932bd4038bd05e3cc3af4c820e522c5783ee`](https://stellar.expert/explorer/testnet/tx/5fafed67546e55aa79f441a5fdd5932bd4038bd05e3cc3af4c820e522c5783ee)
+- Network: Stellar Testnet; ledger: **4,761,475**; transaction status: **SUCCESS**.
+- The signed transaction invoked `create_order` on the MilvanceCore ID in
+  `deployments/testnet.json`. Its source account matched the buyer argument.
+- The successful contract event was `order_created` for **order #1**.
+- A fresh generated-binding read returned `order_count = 1` and order #1 in
+  `Created` state. Its buyer and supplier matched the invocation, and its asset
+  matched the approved USDC SAC in the deployment artifact.
+- Horizon independently showed the buyer account's trustline for the approved
+  Testnet USDC issuer.
+
+This proves the PKG-06 browser-wallet authorization exit gate. Creating this empty
+order did not fund a milestone or transfer USDC. Later financial actions still
+require their own wallet authorization and validation.
+
 ## Live check
 
 1. Run `pnpm --filter @milvance/web dev` and open `http://localhost:3000/wallet` in
