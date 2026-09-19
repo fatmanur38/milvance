@@ -2,7 +2,7 @@
   "name": "@milvance/contract-bindings",
   "version": "0.0.0",
   "private": true,
-  "description": "Generated MilvanceCore TypeScript bindings — generated in PKG-05",
+  "description": "Generated TypeScript bindings for the deployed MilvanceCore contract",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -24,5 +24,9 @@
   "devDependencies": {
     "typescript": "5.9.3",
     "vitest": "4.1.11"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "16.0.1",
+    "buffer": "6.0.3"
   }
 }

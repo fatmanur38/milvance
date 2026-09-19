@@ -134,15 +134,15 @@ reach the browser.
 
 ## Roadmap to submission
 
-| Phase | Package(s)     | Scope                                            | Status  |
-| ----- | -------------- | ------------------------------------------------ | ------- |
-| 0     | PKG-00         | Repository, tooling, CI, guardrails              | ✅ done |
-| 1     | PKG-01…PKG-04  | Soroban financial core                           | ✅ done |
-| 2     | PKG-05, PKG-06 | Testnet deployment, Stellar Wallets Kit          | ⬜ next |
-| 3     | PKG-07         | Anchor / local payments (TRY ↔ USDC)             | ⬜      |
-| 4     | PKG-08         | API, PostgreSQL read models, Soroban indexer     | ⬜      |
-| 5     | PKG-09…PKG-11  | Product UI, Trade Lab, public traction dashboard | ⬜      |
-| 6     | PKG-12         | Hardening, documentation, demo, submission       | ⬜      |
+| Phase | Package(s)     | Scope                                            | Status                   |
+| ----- | -------------- | ------------------------------------------------ | ------------------------ |
+| 0     | PKG-00         | Repository, tooling, CI, guardrails              | ✅ done                  |
+| 1     | PKG-01…PKG-04  | Soroban financial core                           | ✅ done                  |
+| 2     | PKG-05, PKG-06 | Testnet deployment, Stellar Wallets Kit          | PKG-05 done; PKG-06 next |
+| 3     | PKG-07         | Anchor / local payments (TRY ↔ USDC)             | ⬜                       |
+| 4     | PKG-08         | API, PostgreSQL read models, Soroban indexer     | ⬜                       |
+| 5     | PKG-09…PKG-11  | Product UI, Trade Lab, public traction dashboard | ⬜                       |
+| 6     | PKG-12         | Hardening, documentation, demo, submission       | ⬜                       |
 
 ## Documentation
 
@@ -154,7 +154,18 @@ reach the browser.
 
 ## Live deployment
 
-Testnet contract ID and USDC asset contract ID are published here after PKG-05. _TBD_
+MilvanceCore is deployed on **Stellar Testnet** (`Test SDF Network ; September 2015`).
+
+| Item                                                                                                                                  | Public value                                                                        |
+| ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| [MilvanceCore contract](https://stellar.expert/explorer/testnet/contract/CCN6AZHLN2BQPCDZWXJGA3NRJEJ56V5JK3M4VZ5QFKQ3NSJBN6RVTKRX)    | `CCN6AZHLN2BQPCDZWXJGA3NRJEJ56V5JK3M4VZ5QFKQ3NSJBN6RVTKRX`                          |
+| Approved USDC issuer                                                                                                                  | `GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5`                          |
+| USDC SAC                                                                                                                              | `CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA`                          |
+| [Deployment transaction](https://stellar.expert/explorer/testnet/tx/72cb01b9e681ec2861ce56fecac0fadad9884cc773226b353080d9b1dd69a1b4) | `72cb01b9e681ec2861ce56fecac0fadad9884cc773226b353080d9b1dd69a1b4` (ledger 4760607) |
+
+The [deployment artifact](deployments/testnet.json) includes the WASM hash and
+public network metadata. See the [Testnet deployment guide](scripts/deploy-testnet/README.md)
+for the repeatable deployment, bindings, and read-only smoke-test commands.
 
 ## Built for
 

@@ -20,10 +20,14 @@
     "contract:test": "cargo test",
     "contract:fmt": "cargo fmt --all -- --check",
     "contract:clippy": "cargo clippy --all-targets -- -D warnings",
+    "deploy:testnet": "node scripts/deploy-testnet/deploy.mjs",
+    "bindings:generate": "node scripts/deploy-testnet/generate-bindings.mjs",
+    "smoke:testnet": "node scripts/deploy-testnet/smoke.mjs",
     "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm contract:fmt && pnpm contract:clippy && pnpm contract:test"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@stellar/stellar-sdk": "16.0.1",
     "eslint": "10.11.0",
     "prettier": "3.9.8",
     "turbo": "2.11.2",

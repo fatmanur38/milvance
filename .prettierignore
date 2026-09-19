@@ -12,3 +12,4 @@ MILVANCE_SSOT.md
 # Generated
 next-env.d.ts
 contracts/**/test_snapshots/
+packages/contract-bindings/src/generated/
