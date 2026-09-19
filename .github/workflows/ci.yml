@@ -47,8 +47,20 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
+      # Prebuilt binary rather than `cargo install stellar-cli`: building from
+      # source pulls libdbus-sys, whose system dependency (libdbus-1-dev) is not
+      # present on ubuntu-latest, and took 13 minutes before failing.
       - name: Install Stellar CLI
-        run: cargo install --locked stellar-cli@28.0.0
+        env:
+          STELLAR_CLI_VERSION: 28.0.0
+        run: |
+          set -euo pipefail
+          url="https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          curl --proto '=https' --tlsv1.2 -fsSL "$url" -o /tmp/stellar-cli.tar.gz
+          tar -xzf /tmp/stellar-cli.tar.gz -C /tmp
+          install -m 0755 /tmp/stellar "$HOME/.cargo/bin/stellar"
+          stellar --version
+
       - run: stellar contract build
 
   secret-hygiene:
