@@ -182,6 +182,20 @@ Stellar Testnet in ledger **4,761,475**. The contract emitted `order_created` fo
 buyer and supplier and the approved USDC SAC. View the
 [public transaction](https://stellar.expert/explorer/testnet/tx/5fafed67546e55aa79f441a5fdd5932bd4038bd05e3cc3af4c820e522c5783ee).
 
+## Local payment proof
+
+Open `http://localhost:3000/anchor` to move between Turkish lira and Stellar USDC
+through a SEP-6 Anchor. Both directions were run live on Stellar Testnet from the
+browser with Freighter signing every transaction:
+
+| Direction  | Quoted                         | Public transaction                                                                                                                            |
+| ---------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| TRY → USDC | 1,000.00 TRY → 20.3960908 USDC | [`cc50640a…`](https://stellar.expert/explorer/testnet/tx/cc50640ab6bd9e377e5fedad276186c748d7d92a7b75c15e1aafd5182e1415fa) (ledger 4,763,352) |
+| USDC → TRY | 20 USDC → 970.82 TRY           | [`a9f38d19…`](https://stellar.expert/explorer/testnet/tx/a9f38d19afa9c153290799e6e82058b6def395d16688a830c85b93f3563f29c7) (ledger 4,763,239) |
+
+Milvance never holds a key, a seed, or a signature on the user's behalf. See the
+[local payments guide](docs/ANCHOR_LOCAL_PAYMENTS.md).
+
 ## Built for
 
 Stellar Pro Hackathon 2026 — Genesis Track.

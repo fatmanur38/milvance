@@ -59,8 +59,11 @@ not a real bank transfer" panel. Simulated hackathon KYC is not production KYC.
 
 ## Verified live Testnet proof
 
-Both directions were run end to end against `tr-mock-anchor.fly.dev` on Stellar
-Testnet with a throwaway account.
+Both directions were proven twice on Stellar Testnet against
+`tr-mock-anchor.fly.dev`: first over the raw SEP protocol with a throwaway
+account, then through the real browser UI with a Freighter-signed session.
+
+## Proof 1 — protocol run (throwaway account)
 
 ### TRY → USDC (on-ramp)
 
@@ -82,7 +85,50 @@ Testnet with a throwaway account.
 - Status reached `completed` with payout reference `FAST-I6BN52CMY3`.
 - On-chain USDC balance: **20.3960908 → 0.3960908**.
 
-No secret key, JWT or KYC material appears in this repository or in the proof above.
+## Proof 2 — browser run signed with Freighter
+
+The same two flows were then driven entirely from `http://localhost:3000/anchor`
+by a human using the Freighter extension. Every Stellar signature came from the
+browser wallet; no key was ever held by Milvance. Both hashes below were verified
+independently against Horizon rather than taken from the UI.
+
+### TRY → USDC (on-ramp)
+
+- Quoted at the Anchor's rate: **1,000.00 TRY → ≈20.3960908 USDC**.
+- Stellar settlement:
+  [`cc50640ab6bd9e377e5fedad276186c748d7d92a7b75c15e1aafd5182e1415fa`](https://stellar.expert/explorer/testnet/tx/cc50640ab6bd9e377e5fedad276186c748d7d92a7b75c15e1aafd5182e1415fa)
+- Ledger **4,763,352**, `2026-09-19T17:52:27Z`, status **SUCCESS**.
+- One `payment` operation of **20.3960908 USDC** from the Anchor's declared
+  distribution account `GCLCZEQZ…W2W7T3Z6` to the browser wallet, in USDC issued
+  by the approved Testnet issuer in `deployments/testnet.json`.
+
+### USDC → TRY (off-ramp)
+
+- Quoted at the Anchor's rate: **20 USDC → 970.82 TRY**; the UI reported the TRY
+  payout as `completed`.
+- Wallet-signed payment:
+  [`a9f38d19afa9c153290799e6e82058b6def395d16688a830c85b93f3563f29c7`](https://stellar.expert/explorer/testnet/tx/a9f38d19afa9c153290799e6e82058b6def395d16688a830c85b93f3563f29c7)
+- Ledger **4,763,239**, `2026-09-19T17:43:02Z`, status **SUCCESS**.
+- One `payment` operation of **20.0000000 USDC** from the browser wallet to the
+  same declared Anchor account, carrying the required withdrawal memo
+  **`653161731091`** (type `id`).
+
+### What this proof does and does not show
+
+- The signing account is the same browser wallet that produced the PKG-06 live
+  proof, and it is **not** the deployer identity in `deployments/testnet.json`.
+- Both legs move USDC from the approved issuer only, to or from an account the
+  Anchor itself declares in `ACCOUNTS` in its `stellar.toml`.
+- The account's Horizon balance history is arithmetically consistent with these
+  two payments.
+- The Anchor-side transfer IDs and the TRY payout reference are **not recorded
+  here**: SEP-6 scopes every transfer to its authenticated account, so they
+  cannot be retrieved without that user's bearer token, and the token is never
+  stored, logged or committed. The TRY leg is therefore attested by the Anchor
+  and by the operator's own screen, not by a public ledger — which is the
+  expected shape for local money.
+
+No secret key, JWT or KYC material appears in this repository or in either proof.
 
 ## Memo handling
 
