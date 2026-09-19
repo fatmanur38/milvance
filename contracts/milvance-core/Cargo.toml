@@ -1,0 +1,17 @@
+[package]
+name = "milvance-core"
+description = "MilvanceCore — Soroban financial state machine for buyer-protected production milestones"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["lib", "cdylib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

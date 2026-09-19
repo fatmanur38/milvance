@@ -1,0 +1,33 @@
+{
+  "name": "milvance",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Local-payment-powered production finance on Stellar / Soroban",
+  "license": "MIT",
+  "packageManager": "pnpm@10.22.0",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "contract:build": "stellar contract build",
+    "contract:test": "cargo test",
+    "contract:fmt": "cargo fmt --all -- --check",
+    "contract:clippy": "cargo clippy --all-targets -- -D warnings",
+    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm contract:fmt && pnpm contract:clippy && pnpm contract:test"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.11.0",
+    "prettier": "3.9.8",
+    "turbo": "2.11.2",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.70.0"
+  }
+}

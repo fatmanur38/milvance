@@ -1,0 +1,14 @@
+node_modules
+.next
+dist
+coverage
+target
+.turbo
+pnpm-lock.yaml
+AGENT.md
+AGENTS.md
+MILVANCE_SSOT.md
+
+# Generated
+next-env.d.ts
+contracts/**/test_snapshots/
