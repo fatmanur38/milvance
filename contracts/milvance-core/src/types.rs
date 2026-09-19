@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address};
+use soroban_sdk::{contracttype, Address, BytesN};
 
 /// Deterministic, monotonically increasing identifiers. Counters start at 1, so
 /// `0` is never a valid id and can be treated as "unset" off-chain.
@@ -128,6 +128,12 @@ pub struct Milestone {
     /// Informational target date. Expiry alone must never move funds
     /// (invariant 25); it can only surface a derived status off-chain.
     pub deadline: Option<u64>,
+    /// SHA-256 commitment to the off-chain evidence for this milestone.
+    ///
+    /// Only the digest lives on chain. Raw documents — bills of lading, QC
+    /// reports, packing lists, delivery confirmations — stay off-chain, and the
+    /// contract attaches no meaning to what the digest covers.
+    pub evidence_hash: Option<BytesN<32>>,
     pub status: MilestoneStatus,
     pub created_at: u64,
 }
@@ -186,6 +192,12 @@ pub struct FundingOffer {
     pub status: OfferStatus,
 }
 
+/// Lifecycle of a funder's repayment position.
+///
+/// `Closed` means the position ended **without** repayment from milestone
+/// escrow — the refund path. The funder's advance is not clawed back and the
+/// supplier keeps it; whatever claim the funder retains against the supplier is
+/// an off-chain matter this contract does not model.
 #[contracttype]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum FinancePositionStatus {

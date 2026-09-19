@@ -14,7 +14,7 @@
 //! - never emit carrier/shipment-specific events; shipment meaning is an
 //!   off-chain label, not contract semantics.
 
-use soroban_sdk::{contractevent, Address};
+use soroban_sdk::{contractevent, Address, BytesN};
 
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -170,4 +170,95 @@ pub struct AcceptanceReleased {
     /// The funder that was selected but never funded.
     pub funder: Address,
     pub request_reopened: bool,
+}
+
+/// The supplier committed a SHA-256 digest of the off-chain evidence.
+///
+/// Only the digest is emitted. Raw documents and any KYC material stay
+/// off-chain, and the contract attaches no meaning to what the digest covers —
+/// production photos, a bill of lading or a delivery confirmation are all the
+/// same 32 bytes here.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EvidenceSubmitted {
+    #[topic]
+    pub milestone_id: u64,
+    pub supplier: Address,
+    pub evidence_hash: BytesN<32>,
+    /// True when this replaced an earlier, not-yet-verified submission.
+    pub replaced_previous: bool,
+}
+
+/// The assigned attestor verified the milestone against a specific digest.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MilestoneVerified {
+    #[topic]
+    pub milestone_id: u64,
+    pub attestor: Address,
+    pub evidence_hash: BytesN<32>,
+}
+
+/// Protected escrow was paid out, funder first.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MilestoneSettled {
+    #[topic]
+    pub order_id: u64,
+    #[topic]
+    pub milestone_id: u64,
+    /// Escrow released in total; equals `funder_repayment + supplier_payout`.
+    pub protected_amount: i128,
+    /// Repaid to the funder first. Zero when the milestone was unfinanced.
+    pub funder_repayment: i128,
+    /// The supplier's remainder after the funder was made whole.
+    pub supplier_payout: i128,
+}
+
+/// Escrow was returned to the buyer after a REFUND resolution.
+///
+/// `funder_advance_outstanding` records that a funder's advance was **not**
+/// reversed by this refund: the supplier keeps it, and the funder's claim is an
+/// off-chain matter.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MilestoneRefunded {
+    #[topic]
+    pub order_id: u64,
+    #[topic]
+    pub milestone_id: u64,
+    pub buyer: Address,
+    pub refunded_amount: i128,
+    pub funder_advance_outstanding: i128,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DisputeOpened {
+    #[topic]
+    pub milestone_id: u64,
+    #[topic]
+    pub dispute_id: u64,
+    pub opened_by: Address,
+    pub resolver: Address,
+}
+
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DisputeResolved {
+    #[topic]
+    pub milestone_id: u64,
+    #[topic]
+    pub dispute_id: u64,
+    pub resolver: Address,
+    /// True for SETTLE (milestone returns to verified), false for REFUND.
+    pub settled: bool,
+}
+
+/// Every milestone on the order reached a terminal state.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OrderCompleted {
+    #[topic]
+    pub order_id: u64,
 }

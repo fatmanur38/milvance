@@ -2,8 +2,8 @@ use soroban_sdk::{contracttype, Env, Vec};
 
 use crate::errors::Error;
 use crate::types::{
-    Config, FinancePosition, FinanceRequest, FundingOffer, Milestone, MilestoneId, OfferId, Order,
-    OrderId,
+    Config, Dispute, DisputeId, FinancePosition, FinanceRequest, FundingOffer, Milestone,
+    MilestoneId, OfferId, Order, OrderId,
 };
 
 /// Approximate ledgers per day at a ~5 second close time.
@@ -337,4 +337,50 @@ pub fn read_milestone_offers(env: &Env, milestone_id: MilestoneId) -> Vec<OfferI
         }
         None => Vec::new(env),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Disputes (PKG-04)
+// ---------------------------------------------------------------------------
+
+pub fn next_dispute_id(env: &Env) -> DisputeId {
+    next_id(env, &DataKey::DisputeCounter)
+}
+
+pub fn dispute_count(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get(&DataKey::DisputeCounter)
+        .unwrap_or(0)
+}
+
+pub fn write_dispute(env: &Env, dispute: &Dispute) {
+    let key = DataKey::Dispute(dispute.id);
+    env.storage().persistent().set(&key, dispute);
+    extend_persistent(env, &key);
+
+    let link = DataKey::MilestoneDispute(dispute.milestone_id);
+    env.storage().persistent().set(&link, &dispute.id);
+    extend_persistent(env, &link);
+}
+
+pub fn find_dispute(env: &Env, dispute_id: DisputeId) -> Option<Dispute> {
+    let key = DataKey::Dispute(dispute_id);
+    let dispute: Option<Dispute> = env.storage().persistent().get(&key);
+    if dispute.is_some() {
+        extend_persistent(env, &key);
+    }
+    dispute
+}
+
+/// The dispute attached to a milestone, if one was ever opened.
+pub fn find_milestone_dispute(env: &Env, milestone_id: MilestoneId) -> Option<Dispute> {
+    let link = DataKey::MilestoneDispute(milestone_id);
+    let dispute_id: DisputeId = env.storage().persistent().get(&link)?;
+    extend_persistent(env, &link);
+    find_dispute(env, dispute_id)
+}
+
+pub fn read_milestone_dispute(env: &Env, milestone_id: MilestoneId) -> Result<Dispute, Error> {
+    find_milestone_dispute(env, milestone_id).ok_or(Error::DisputeNotFound)
 }

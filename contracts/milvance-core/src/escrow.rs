@@ -60,10 +60,8 @@ pub(crate) fn deposit(
 /// (invariant 12) and "funds cannot leak across milestones" (invariant 13)
 /// enforceable by construction rather than by convention.
 ///
-/// **Not reachable from any exported function in PKG-02.** PKG-04 will call it
-/// for the funder-first settlement waterfall and for buyer refunds. It is
-/// defined now so that escrow can only ever leave through this one checked path.
-#[allow(dead_code)]
+/// Used by PKG-04 for the funder-first settlement waterfall and for buyer
+/// refunds. It is the only way escrow can ever leave the contract.
 pub(crate) fn release(
     env: &Env,
     order: &Order,

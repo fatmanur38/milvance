@@ -200,6 +200,63 @@ wallet balance are unchanged.
 A live acceptance cannot be released (`OfferStillLive`): until it expires, the
 selection still belongs to the funder that won it.
 
+### 20. The attestor signs for a specific evidence digest (PKG-04)
+
+`attest_milestone` takes the digest the attestor reviewed and rejects a
+mismatch against what is on record.
+
+Without it, evidence may be replaced between the attestor reading the documents
+off-chain and their transaction landing, and the attestation would silently
+cover a document nobody checked. Evidence is otherwise correctable while
+`Submitted`, which is what creates that window; naming the digest closes it
+without forbidding honest corrections.
+
+### 21. Settlement is triggerable by either beneficiary (PKG-04)
+
+`settle_milestone` takes a caller, requires its authorization, and accepts only
+the supplier or the funder of an active position.
+
+Settlement carries no discretion — the amounts follow from contract state and
+cannot be redirected — so restricting it to one party would only let that party
+withhold the other's money by refusing to act. Both sides have funds in the
+outcome, so either can trigger it. An outsider cannot.
+
+### 22. REFUND returns escrow but never reverses an advance (PKG-04)
+
+A `Refund` resolution returns the milestone's remaining escrow to the buyer and
+marks any active position `Closed` rather than `Repaid`.
+
+The funder's principal already left their wallet for the supplier's. This
+contract has no claim on either balance and does not pretend otherwise: the
+supplier keeps the advance, and whatever the funder is owed is an off-chain
+matter. The `milestone_refunded` event carries
+`funder_advance_outstanding` so this is visible to an indexer rather than
+implied.
+
+This is the risk AGENT.md §10 assigns to the funder, made explicit in state.
+
+### 23. Order completion is a consequence, not an action (PKG-04)
+
+`complete_order_if_finished` is a private helper outside `#[contractimpl]`, run
+after a milestone reaches `Settled` or `Refunded`. When every milestone on the
+order is terminal, the order becomes `Completed` and emits `order_completed`.
+
+It is deliberately not exported: completion is an observation about milestone
+states, never something a party asserts.
+
+### 24. Nothing in the contract branches on a deadline (PKG-04)
+
+`Milestone.deadline` is validated once at creation (must be in the future) and
+read nowhere else. `settle_milestone`, `resolve_dispute`, `open_dispute`,
+`attest_milestone`, `submit_evidence` and `fund_advance` contain zero references
+to it.
+
+A missed deadline therefore cannot settle, refund, repay or penalize by itself
+(invariant 25). `DELAYED` / `NEEDS_REVIEW` stay derived read-model statuses
+(invariant 26). A late milestone settles normally once verified, with no penalty
+— sea freight is delayed by weather, congestion, customs and carrier schedules,
+none of which are the supplier's fault.
+
 ## Consequences
 
 - PKG-02 added escrow to `Milestone.funded_amount` without weakening any guard

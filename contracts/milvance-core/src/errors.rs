@@ -75,4 +75,17 @@ pub enum Error {
     EscrowMutated = 67,
     /// The accepted offer has not expired yet, so it cannot be released.
     OfferStillLive = 68,
+
+    // --- Evidence, attestation, settlement, dispute (PKG-04) ---
+    /// No evidence has been committed for this milestone.
+    EvidenceNotFound = 70,
+    /// The attestor signed for a different digest than the one on record.
+    EvidenceMismatch = 71,
+    /// An all-zero digest is rejected as an unset sentinel.
+    InvalidEvidence = 72,
+    DisputeNotFound = 73,
+    DisputeAlreadyOpen = 74,
+    InvalidDisputeStatus = 75,
+    /// The milestone holds no escrow to pay out or return.
+    NothingToSettle = 76,
 }

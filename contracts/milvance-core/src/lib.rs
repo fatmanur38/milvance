@@ -26,12 +26,13 @@
 //! Consequently **no value can move through this contract yet**, and no code
 //! path treats buyer money as supplier cash.
 
-use soroban_sdk::{contract, contractimpl, Address, Env, Vec};
+use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Vec};
 
 mod errors;
 mod escrow;
 mod events;
 mod financing;
+mod settlement;
 mod storage;
 mod types;
 
@@ -195,6 +196,7 @@ impl MilvanceCore {
             // from the buyer's own transfer into the contract.
             funded_amount: 0,
             deadline,
+            evidence_hash: None,
             status: MilestoneStatus::Unfunded,
             created_at: env.ledger().timestamp(),
         };
@@ -805,6 +807,355 @@ impl MilvanceCore {
     }
 
     // -----------------------------------------------------------------------
+    // Evidence, attestation, settlement and dispute (PKG-04)
+    // -----------------------------------------------------------------------
+
+    /// Supplier commits a SHA-256 digest of the off-chain evidence.
+    ///
+    /// Authorized by the **supplier**. Only the digest is stored: raw documents
+    /// live in off-chain storage, and this contract attaches no meaning to what
+    /// the digest covers. A production photo set, a bill of lading and a
+    /// delivery confirmation are all just 32 bytes here, which is what keeps
+    /// the same state machine usable for raw materials, production, QC,
+    /// shipment and delivery without the contract knowing what a ship is.
+    ///
+    /// Accepted from `Funded` (unfinanced) or `Financed`, and again from
+    /// `Submitted` so a supplier can correct a bad upload before anyone
+    /// verifies it. Once the milestone is verified, disputed or terminal, the
+    /// evidence is frozen (invariant 18).
+    ///
+    /// Submitting evidence moves no money.
+    pub fn submit_evidence(
+        env: &Env,
+        milestone_id: u64,
+        evidence_hash: BytesN<32>,
+    ) -> Result<(), Error> {
+        let mut milestone = storage::read_milestone(env, milestone_id)?;
+        let order = storage::read_order(env, milestone.order_id)?;
+
+        order.supplier.require_auth();
+
+        if order.status != OrderStatus::Active {
+            return Err(Error::InvalidOrderStatus);
+        }
+        match milestone.status {
+            MilestoneStatus::Funded | MilestoneStatus::Financed | MilestoneStatus::Submitted => {}
+            _ => return Err(Error::InvalidMilestoneStatus),
+        }
+        if evidence_hash == BytesN::from_array(env, &[0u8; 32]) {
+            return Err(Error::InvalidEvidence);
+        }
+
+        let replaced_previous = milestone.evidence_hash.is_some();
+        milestone.evidence_hash = Some(evidence_hash.clone());
+        milestone.status = MilestoneStatus::Submitted;
+
+        storage::write_milestone(env, &milestone);
+        storage::extend_instance(env);
+
+        events::EvidenceSubmitted {
+            milestone_id,
+            supplier: order.supplier,
+            evidence_hash,
+            replaced_previous,
+        }
+        .publish(env);
+
+        Ok(())
+    }
+
+    /// The assigned attestor verifies the milestone.
+    ///
+    /// Authorized by the **order's attestor** (invariant 14), read from stored
+    /// state so no other account can verify in their place.
+    ///
+    /// The attestor names the digest they reviewed, and it must match what is
+    /// on record. Without that, a supplier could swap the evidence between the
+    /// attestor reading it off-chain and their transaction landing, and the
+    /// attestation would silently cover a document nobody checked.
+    ///
+    /// This is the contract's trust boundary and it is a human one: Soroban
+    /// cannot know that goods were manufactured, loaded, shipped or delivered.
+    /// It knows only that the assigned attestor signed for this digest.
+    pub fn attest_milestone(
+        env: &Env,
+        milestone_id: u64,
+        evidence_hash: BytesN<32>,
+    ) -> Result<(), Error> {
+        let mut milestone = storage::read_milestone(env, milestone_id)?;
+        let order = storage::read_order(env, milestone.order_id)?;
+
+        order.attestor.require_auth();
+
+        if order.status != OrderStatus::Active {
+            return Err(Error::InvalidOrderStatus);
+        }
+        if milestone.status != MilestoneStatus::Submitted {
+            return Err(Error::InvalidMilestoneStatus);
+        }
+
+        let committed = milestone
+            .evidence_hash
+            .clone()
+            .ok_or(Error::EvidenceNotFound)?;
+        if committed != evidence_hash {
+            return Err(Error::EvidenceMismatch);
+        }
+
+        milestone.status = MilestoneStatus::Verified;
+        storage::write_milestone(env, &milestone);
+        storage::extend_instance(env);
+
+        events::MilestoneVerified {
+            milestone_id,
+            attestor: order.attestor,
+            evidence_hash,
+        }
+        .publish(env);
+
+        Ok(())
+    }
+
+    /// Pays out a verified milestone: **funder first, supplier second**.
+    ///
+    /// Authorized by either beneficiary — the supplier, or the funder of an
+    /// active position. Both have money in the outcome, and settlement carries
+    /// no discretion: the amounts follow from contract state and cannot be
+    /// redirected. Letting either side trigger it means neither can withhold
+    /// the other's money by refusing to act.
+    ///
+    /// Requires `Verified` (invariant 8), which is also what makes a disputed
+    /// milestone unsettleable (invariant 9) and a second settlement impossible
+    /// (invariant 10): neither status is `Verified`.
+    ///
+    /// Both transfers and every state change happen in one invocation, so the
+    /// funder can never be repaid without the supplier's remainder following.
+    pub fn settle_milestone(env: &Env, milestone_id: u64, caller: Address) -> Result<(), Error> {
+        caller.require_auth();
+
+        let mut milestone = storage::read_milestone(env, milestone_id)?;
+        let order = storage::read_order(env, milestone.order_id)?;
+
+        if order.status != OrderStatus::Active {
+            return Err(Error::InvalidOrderStatus);
+        }
+        if milestone.status != MilestoneStatus::Verified {
+            return Err(Error::InvalidMilestoneStatus);
+        }
+
+        let mut position = storage::find_finance_position(env, milestone_id);
+        let is_beneficiary = caller == order.supplier
+            || position
+                .as_ref()
+                .is_some_and(|p| p.status == FinancePositionStatus::Active && caller == p.funder);
+        if !is_beneficiary {
+            return Err(Error::Unauthorized);
+        }
+
+        let waterfall = settlement::compute(&milestone, position.as_ref())?;
+        let protected_amount = waterfall.total()?;
+
+        // The funder is made whole first.
+        if waterfall.funder_repayment > 0 {
+            let funder = position
+                .as_ref()
+                .map(|p| p.funder.clone())
+                .ok_or(Error::FinancePositionNotFound)?;
+            escrow::release(
+                env,
+                &order,
+                &mut milestone,
+                &funder,
+                waterfall.funder_repayment,
+            )?;
+        }
+        if waterfall.supplier_payout > 0 {
+            escrow::release(
+                env,
+                &order,
+                &mut milestone,
+                &order.supplier,
+                waterfall.supplier_payout,
+            )?;
+        }
+
+        if let Some(position) = position.as_mut() {
+            if position.status == FinancePositionStatus::Active {
+                position.status = FinancePositionStatus::Repaid;
+                storage::write_finance_position(env, position);
+            }
+        }
+
+        milestone.status = MilestoneStatus::Settled;
+        storage::write_milestone(env, &milestone);
+        storage::extend_instance(env);
+
+        events::MilestoneSettled {
+            order_id: milestone.order_id,
+            milestone_id,
+            protected_amount,
+            funder_repayment: waterfall.funder_repayment,
+            supplier_payout: waterfall.supplier_payout,
+        }
+        .publish(env);
+
+        Self::complete_order_if_finished(env, &order);
+
+        Ok(())
+    }
+
+    /// Buyer or supplier freezes a single milestone for review.
+    ///
+    /// Only this milestone is affected. Sibling milestones keep their own
+    /// escrow, financing and terminal states untouched (AGENT.md §9A.5), which
+    /// is what lets a delivery dispute on M4 leave settled M1-M3 alone.
+    ///
+    /// A passed deadline is **not** a reason this function fires on its own.
+    /// Nothing in this contract reacts to a deadline; a party has to open a
+    /// dispute deliberately (invariants 25, 26).
+    pub fn open_dispute(env: &Env, milestone_id: u64, caller: Address) -> Result<u64, Error> {
+        caller.require_auth();
+
+        let mut milestone = storage::read_milestone(env, milestone_id)?;
+        let order = storage::read_order(env, milestone.order_id)?;
+
+        if order.status != OrderStatus::Active {
+            return Err(Error::InvalidOrderStatus);
+        }
+        if caller != order.buyer && caller != order.supplier {
+            return Err(Error::Unauthorized);
+        }
+        // Entry points per the approved state machine: a verified or terminal
+        // milestone cannot be dragged back into dispute.
+        match milestone.status {
+            MilestoneStatus::Funded | MilestoneStatus::Financed | MilestoneStatus::Submitted => {}
+            _ => return Err(Error::InvalidMilestoneStatus),
+        }
+        if let Some(existing) = storage::find_milestone_dispute(env, milestone_id) {
+            if existing.status == DisputeStatus::Open {
+                return Err(Error::DisputeAlreadyOpen);
+            }
+        }
+
+        let dispute_id = storage::next_dispute_id(env);
+        let dispute = Dispute {
+            id: dispute_id,
+            milestone_id,
+            opened_by: caller.clone(),
+            resolver: order.resolver.clone(),
+            status: DisputeStatus::Open,
+            opened_at: env.ledger().timestamp(),
+        };
+
+        milestone.status = MilestoneStatus::Disputed;
+        storage::write_dispute(env, &dispute);
+        storage::write_milestone(env, &milestone);
+        storage::extend_instance(env);
+
+        events::DisputeOpened {
+            milestone_id,
+            dispute_id,
+            opened_by: caller,
+            resolver: order.resolver,
+        }
+        .publish(env);
+
+        Ok(dispute_id)
+    }
+
+    /// The assigned resolver decides a disputed milestone.
+    ///
+    /// Authorized by the **order's resolver** (invariant 15).
+    ///
+    /// - `Settle` returns the milestone to `Verified`, from where
+    ///   [`Self::settle_milestone`] pays the normal funder-first waterfall.
+    /// - `Refund` returns the milestone's remaining escrow to the buyer and
+    ///   ends the milestone as `Refunded`.
+    ///
+    /// A refund returns **only the escrow this milestone still holds**. It does
+    /// not reverse an advance a funder already paid the supplier: that money
+    /// left the funder's wallet for the supplier's and this contract cannot
+    /// claw it back. The position is marked `Closed` rather than `Repaid` to
+    /// record exactly that.
+    pub fn resolve_dispute(
+        env: &Env,
+        milestone_id: u64,
+        resolution: DisputeResolution,
+    ) -> Result<(), Error> {
+        let mut milestone = storage::read_milestone(env, milestone_id)?;
+        let order = storage::read_order(env, milestone.order_id)?;
+        let mut dispute = storage::read_milestone_dispute(env, milestone_id)?;
+
+        order.resolver.require_auth();
+
+        if order.status != OrderStatus::Active {
+            return Err(Error::InvalidOrderStatus);
+        }
+        if milestone.status != MilestoneStatus::Disputed {
+            return Err(Error::InvalidMilestoneStatus);
+        }
+        if dispute.status != DisputeStatus::Open {
+            return Err(Error::InvalidDisputeStatus);
+        }
+
+        let settled = resolution == DisputeResolution::Settle;
+
+        if settled {
+            dispute.status = DisputeStatus::ResolvedSettle;
+            milestone.status = MilestoneStatus::Verified;
+            storage::write_milestone(env, &milestone);
+        } else {
+            dispute.status = DisputeStatus::ResolvedRefund;
+
+            let refunded_amount = milestone.funded_amount;
+            if refunded_amount <= 0 {
+                return Err(Error::NothingToSettle);
+            }
+
+            let mut outstanding_advance = 0i128;
+            if let Some(mut position) = storage::find_finance_position(env, milestone_id) {
+                if position.status == FinancePositionStatus::Active {
+                    // The advance is not reversed; the supplier keeps it.
+                    outstanding_advance = position.principal;
+                    position.status = FinancePositionStatus::Closed;
+                    storage::write_finance_position(env, &position);
+                }
+            }
+
+            escrow::release(env, &order, &mut milestone, &order.buyer, refunded_amount)?;
+
+            milestone.status = MilestoneStatus::Refunded;
+            storage::write_milestone(env, &milestone);
+
+            events::MilestoneRefunded {
+                order_id: milestone.order_id,
+                milestone_id,
+                buyer: order.buyer.clone(),
+                refunded_amount,
+                funder_advance_outstanding: outstanding_advance,
+            }
+            .publish(env);
+        }
+
+        storage::write_dispute(env, &dispute);
+        storage::extend_instance(env);
+
+        events::DisputeResolved {
+            milestone_id,
+            dispute_id: dispute.id,
+            resolver: order.resolver.clone(),
+            settled,
+        }
+        .publish(env);
+
+        if !settled {
+            Self::complete_order_if_finished(env, &order);
+        }
+
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
     // Read helpers
     // -----------------------------------------------------------------------
 
@@ -889,9 +1240,25 @@ impl MilvanceCore {
         }
     }
 
+    /// The dispute attached to a milestone, if one was ever opened.
+    pub fn get_milestone_dispute(env: &Env, milestone_id: u64) -> Result<Dispute, Error> {
+        storage::read_milestone_dispute(env, milestone_id)
+    }
+
+    /// Committed evidence digest for a milestone.
+    pub fn get_evidence_hash(env: &Env, milestone_id: u64) -> Result<BytesN<32>, Error> {
+        storage::read_milestone(env, milestone_id)?
+            .evidence_hash
+            .ok_or(Error::EvidenceNotFound)
+    }
+
     /// Number of orders created so far; also the id of the most recent order.
     pub fn order_count(env: &Env) -> u64 {
         storage::order_count(env)
+    }
+
+    pub fn dispute_count(env: &Env) -> u64 {
+        storage::dispute_count(env)
     }
 
     /// Number of funding offers created so far, across all milestones.
@@ -907,3 +1274,32 @@ impl MilvanceCore {
 
 #[cfg(test)]
 mod test;
+
+impl MilvanceCore {
+    /// Marks the order `Completed` once every milestone is terminal.
+    ///
+    /// Not exported: order completion is a consequence of settling or refunding
+    /// the last milestone, never an action anyone invokes directly.
+    fn complete_order_if_finished(env: &Env, order: &Order) {
+        let milestone_ids = storage::read_order_milestones(env, order.id);
+        if milestone_ids.is_empty() {
+            return;
+        }
+
+        for milestone_id in milestone_ids.iter() {
+            match storage::read_milestone(env, milestone_id) {
+                Ok(milestone) => match milestone.status {
+                    MilestoneStatus::Settled | MilestoneStatus::Refunded => {}
+                    _ => return,
+                },
+                Err(_) => return,
+            }
+        }
+
+        let mut order = order.clone();
+        order.status = OrderStatus::Completed;
+        storage::write_order(env, &order);
+
+        events::OrderCompleted { order_id: order.id }.publish(env);
+    }
+}

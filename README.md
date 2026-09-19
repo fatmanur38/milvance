@@ -134,15 +134,15 @@ reach the browser.
 
 ## Roadmap to submission
 
-| Phase | Package(s)     | Scope                                            | Status                      |
-| ----- | -------------- | ------------------------------------------------ | --------------------------- |
-| 0     | PKG-00         | Repository, tooling, CI, guardrails              | ✅ done                     |
-| 1     | PKG-01…PKG-04  | Soroban financial core                           | 🟡 PKG-01 done, PKG-02 next |
-| 2     | PKG-05, PKG-06 | Testnet deployment, Stellar Wallets Kit          | ⬜                          |
-| 3     | PKG-07         | Anchor / local payments (TRY ↔ USDC)             | ⬜                          |
-| 4     | PKG-08         | API, PostgreSQL read models, Soroban indexer     | ⬜                          |
-| 5     | PKG-09…PKG-11  | Product UI, Trade Lab, public traction dashboard | ⬜                          |
-| 6     | PKG-12         | Hardening, documentation, demo, submission       | ⬜                          |
+| Phase | Package(s)     | Scope                                            | Status  |
+| ----- | -------------- | ------------------------------------------------ | ------- |
+| 0     | PKG-00         | Repository, tooling, CI, guardrails              | ✅ done |
+| 1     | PKG-01…PKG-04  | Soroban financial core                           | ✅ done |
+| 2     | PKG-05, PKG-06 | Testnet deployment, Stellar Wallets Kit          | ⬜ next |
+| 3     | PKG-07         | Anchor / local payments (TRY ↔ USDC)             | ⬜      |
+| 4     | PKG-08         | API, PostgreSQL read models, Soroban indexer     | ⬜      |
+| 5     | PKG-09…PKG-11  | Product UI, Trade Lab, public traction dashboard | ⬜      |
+| 6     | PKG-12         | Hardening, documentation, demo, submission       | ⬜      |
 
 ## Documentation
 

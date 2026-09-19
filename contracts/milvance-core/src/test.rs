@@ -8,15 +8,15 @@ use soroban_sdk::{
     },
     token::{Client as TokenClient, StellarAssetClient},
     xdr::ContractEventBody,
-    Address, Env, IntoVal, Symbol, TryFromVal, Val,
+    Address, BytesN, Env, IntoVal, Symbol, TryFromVal, Val,
 };
 
 use crate::storage::{INSTANCE_BUMP_AMOUNT, PERSISTENT_BUMP_AMOUNT, TEMPORARY_BUMP_AMOUNT};
 use crate::{
-    DataKey, Error, FinancePositionStatus, FinanceRequestStatus, MilestoneStatus, MilvanceCore,
-    MilvanceCoreClient, OfferStatus, OrderStatus, MAX_MILESTONES_PER_ORDER,
-    MAX_OFFERS_PER_MILESTONE, MAX_OFFER_VALIDITY_SECONDS, MAX_REQUEST_VALIDITY_SECONDS,
-    PROTOCOL_VERSION,
+    DataKey, DisputeResolution, DisputeStatus, Error, FinancePositionStatus, FinanceRequestStatus,
+    MilestoneStatus, MilvanceCore, MilvanceCoreClient, OfferStatus, OrderStatus,
+    MAX_MILESTONES_PER_ORDER, MAX_OFFERS_PER_MILESTONE, MAX_OFFER_VALIDITY_SECONDS,
+    MAX_REQUEST_VALIDITY_SECONDS, PROTOCOL_VERSION,
 };
 
 /// Stellar assets carry 7 decimals, so amounts are expressed in stroops.
@@ -177,6 +177,38 @@ impl Fixture {
             &expires,
         );
         (offer_a, offer_b)
+    }
+
+    // --- PKG-04 helpers ---
+
+    /// A distinct, non-zero 32-byte digest.
+    fn evidence(&self, seed: u8) -> BytesN<32> {
+        let mut bytes = [0u8; 32];
+        bytes[0] = seed;
+        bytes[31] = seed.wrapping_add(7);
+        BytesN::from_array(&self.env, &bytes)
+    }
+
+    /// Drives a financed milestone all the way to `Verified`.
+    fn financed_and_verified(&self) -> (u64, u64, u64) {
+        let (order_id, m1, m2) = self.milestone_seeking_finance();
+        let (_, offer_b) = self.competing_offers(m1);
+        self.client.accept_offer(&offer_b);
+        self.client.fund_advance(&m1);
+        let hash = self.evidence(1);
+        self.client.submit_evidence(&m1, &hash);
+        self.client.attest_milestone(&m1, &hash);
+        (order_id, m1, m2)
+    }
+
+    /// Drives an unfinanced milestone to `Verified`.
+    fn unfinanced_and_verified(&self) -> (u64, u64, u64) {
+        let (order_id, m1, m2) = self.active_order_with_two_milestones();
+        self.client.fund_milestone(&m1, &AMOUNT_M1, &self.usdc);
+        let hash = self.evidence(2);
+        self.client.submit_evidence(&m1, &hash);
+        self.client.attest_milestone(&m1, &hash);
+        (order_id, m1, m2)
     }
 
     fn offer_ttl(&self, offer_id: u64) -> u32 {
@@ -2566,4 +2598,979 @@ fn recovery_emits_acceptance_released() {
         f.last_event_name(),
         Symbol::new(&f.env, "acceptance_released")
     );
+}
+
+// ===========================================================================
+// PKG-04 — Evidence and attestation
+// ===========================================================================
+
+#[test]
+fn the_supplier_commits_an_evidence_digest() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+
+    let hash = f.evidence(1);
+    f.client.submit_evidence(&m1, &hash);
+
+    let milestone = f.client.get_milestone(&m1);
+    assert_eq!(milestone.status, MilestoneStatus::Submitted);
+    assert_eq!(milestone.evidence_hash, Some(hash.clone()));
+    assert_eq!(f.client.get_evidence_hash(&m1), hash);
+    // Committing evidence moves no money.
+    assert_eq!(f.escrow_balance(), AMOUNT_M1);
+    assert_eq!(f.balance(&f.supplier), 0);
+}
+
+#[test]
+fn a_financed_milestone_can_submit_evidence() {
+    let f = setup();
+    let (_, m1, _) = f.milestone_seeking_finance();
+    let (_, offer_b) = f.competing_offers(m1);
+    f.client.accept_offer(&offer_b);
+    f.client.fund_advance(&m1);
+
+    f.client.submit_evidence(&m1, &f.evidence(1));
+
+    assert_eq!(
+        f.client.get_milestone(&m1).status,
+        MilestoneStatus::Submitted
+    );
+    // The advance the supplier already received is untouched.
+    assert_eq!(f.balance(&f.supplier), PRINCIPAL);
+}
+
+#[test]
+fn evidence_may_be_corrected_before_verification() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+
+    f.client.submit_evidence(&m1, &f.evidence(1));
+    let corrected = f.evidence(2);
+    f.client.submit_evidence(&m1, &corrected);
+
+    assert_eq!(f.client.get_evidence_hash(&m1), corrected);
+}
+
+#[test]
+fn evidence_cannot_be_overwritten_after_verification() {
+    let f = setup();
+    let (_, m1, _) = f.unfinanced_and_verified();
+    let verified_hash = f.client.get_evidence_hash(&m1);
+
+    assert_eq!(
+        f.client.try_submit_evidence(&m1, &f.evidence(9)),
+        Err(Ok(Error::InvalidMilestoneStatus)),
+    );
+    assert_eq!(f.client.get_evidence_hash(&m1), verified_hash);
+}
+
+#[test]
+fn evidence_is_frozen_once_the_milestone_is_terminal() {
+    let f = setup();
+    let (_, m1, _) = f.unfinanced_and_verified();
+    let hash = f.client.get_evidence_hash(&m1);
+    f.client.settle_milestone(&m1, &f.supplier);
+
+    assert_eq!(
+        f.client.try_submit_evidence(&m1, &f.evidence(9)),
+        Err(Ok(Error::InvalidMilestoneStatus)),
+    );
+    assert_eq!(f.client.get_evidence_hash(&m1), hash);
+}
+
+#[test]
+fn an_all_zero_digest_is_rejected() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+
+    let zero = BytesN::from_array(&f.env, &[0u8; 32]);
+    assert_eq!(
+        f.client.try_submit_evidence(&m1, &zero),
+        Err(Ok(Error::InvalidEvidence)),
+    );
+}
+
+#[test]
+fn evidence_requires_a_protected_milestone() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+
+    // Unfunded: there is nothing protected to verify against.
+    assert_eq!(
+        f.client.try_submit_evidence(&m1, &f.evidence(1)),
+        Err(Ok(Error::InvalidMilestoneStatus)),
+    );
+}
+
+#[test]
+fn only_the_supplier_may_submit_evidence() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+    let hash = f.evidence(1);
+
+    for impostor in [f.buyer.clone(), f.attestor.clone(), f.outsider.clone()] {
+        f.env.mock_auths(&[MockAuth {
+            address: &impostor,
+            invoke: &MockAuthInvoke {
+                contract: &f.contract_id,
+                fn_name: "submit_evidence",
+                args: (m1, hash.clone()).into_val(&f.env),
+                sub_invokes: &[],
+            },
+        }]);
+        assert!(
+            f.client.try_submit_evidence(&m1, &hash).is_err(),
+            "only the supplier may commit evidence"
+        );
+    }
+}
+
+#[test]
+fn the_assigned_attestor_verifies_the_milestone() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+    let hash = f.evidence(1);
+    f.client.submit_evidence(&m1, &hash);
+
+    f.client.attest_milestone(&m1, &hash);
+
+    assert_eq!(
+        f.client.get_milestone(&m1).status,
+        MilestoneStatus::Verified
+    );
+    // Verification moves no money on its own.
+    assert_eq!(f.escrow_balance(), AMOUNT_M1);
+    assert_eq!(f.balance(&f.supplier), 0);
+}
+
+#[test]
+fn the_wrong_attestor_cannot_verify() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+    let hash = f.evidence(1);
+    f.client.submit_evidence(&m1, &hash);
+
+    for impostor in [
+        f.buyer.clone(),
+        f.supplier.clone(),
+        f.resolver.clone(),
+        f.outsider.clone(),
+    ] {
+        f.env.mock_auths(&[MockAuth {
+            address: &impostor,
+            invoke: &MockAuthInvoke {
+                contract: &f.contract_id,
+                fn_name: "attest_milestone",
+                args: (m1, hash.clone()).into_val(&f.env),
+                sub_invokes: &[],
+            },
+        }]);
+        assert!(
+            f.client.try_attest_milestone(&m1, &hash).is_err(),
+            "only the assigned attestor may verify"
+        );
+    }
+
+    f.env.mock_all_auths();
+    assert_eq!(
+        f.client.get_milestone(&m1).status,
+        MilestoneStatus::Submitted
+    );
+}
+
+#[test]
+fn the_attestor_must_sign_for_the_digest_on_record() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+    f.client.submit_evidence(&m1, &f.evidence(1));
+
+    // Guards against a supplier swapping evidence between the attestor
+    // reviewing it off-chain and their transaction landing.
+    assert_eq!(
+        f.client.try_attest_milestone(&m1, &f.evidence(2)),
+        Err(Ok(Error::EvidenceMismatch)),
+    );
+    assert_eq!(
+        f.client.get_milestone(&m1).status,
+        MilestoneStatus::Submitted
+    );
+}
+
+#[test]
+fn verification_requires_submitted_evidence() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+
+    assert_eq!(
+        f.client.try_attest_milestone(&m1, &f.evidence(1)),
+        Err(Ok(Error::InvalidMilestoneStatus)),
+    );
+}
+
+// ===========================================================================
+// PKG-04 — Settlement
+// ===========================================================================
+
+#[test]
+fn financed_settlement_pays_the_funder_first_then_the_supplier() {
+    let f = setup();
+    let (_, m1, _) = f.financed_and_verified();
+
+    let funder_before = f.balance(&f.funder_b);
+    f.client.settle_milestone(&m1, &f.supplier);
+
+    // AGENT.md §9.4: 2,000 protected -> 1,445 funder, 555 supplier.
+    let remainder = AMOUNT_M1 - REPAYMENT_B;
+    assert_eq!(remainder, 555 * STROOPS_PER_UNIT);
+    assert_eq!(f.balance(&f.funder_b), funder_before + REPAYMENT_B);
+    // The supplier's total is the earlier advance plus the remainder.
+    assert_eq!(f.balance(&f.supplier), PRINCIPAL + remainder);
+    assert_eq!(f.balance(&f.supplier), 1_955 * STROOPS_PER_UNIT);
+
+    // The funder is net ahead by exactly repayment - principal.
+    assert_eq!(
+        f.balance(&f.funder_b),
+        FUNDER_INITIAL_BALANCE - PRINCIPAL + REPAYMENT_B
+    );
+
+    // Escrow is fully drained and accounted for.
+    assert_eq!(f.escrow_balance(), 0);
+    assert_eq!(f.client.get_milestone(&m1).funded_amount, 0);
+    assert_eq!(f.client.get_milestone(&m1).status, MilestoneStatus::Settled);
+    assert_eq!(
+        f.client.get_finance_position(&m1).status,
+        FinancePositionStatus::Repaid
+    );
+    assert!(!f.client.has_active_finance_position(&m1));
+}
+
+#[test]
+fn settlement_conserves_value_exactly() {
+    let f = setup();
+    let (_, m1, _) = f.financed_and_verified();
+
+    f.client.settle_milestone(&m1, &f.supplier);
+
+    // Everything the buyer protected ended up with the funder and supplier,
+    // and nothing was created or lost.
+    let funder_received = f.balance(&f.funder_b) - (FUNDER_INITIAL_BALANCE - PRINCIPAL);
+    let supplier_from_escrow = f.balance(&f.supplier) - PRINCIPAL;
+    assert_eq!(funder_received + supplier_from_escrow, AMOUNT_M1);
+    assert_eq!(f.escrow_balance(), 0);
+}
+
+#[test]
+fn unfinanced_settlement_pays_the_whole_milestone_to_the_supplier() {
+    let f = setup();
+    let (_, m1, _) = f.unfinanced_and_verified();
+
+    f.client.settle_milestone(&m1, &f.supplier);
+
+    assert_eq!(f.balance(&f.supplier), AMOUNT_M1);
+    assert_eq!(f.escrow_balance(), 0);
+    assert_eq!(f.client.get_milestone(&m1).status, MilestoneStatus::Settled);
+    // No funder was ever involved.
+    assert_eq!(f.balance(&f.funder_a), FUNDER_INITIAL_BALANCE);
+    assert_eq!(f.balance(&f.funder_b), FUNDER_INITIAL_BALANCE);
+}
+
+#[test]
+fn the_funder_can_also_trigger_settlement() {
+    let f = setup();
+    let (_, m1, _) = f.financed_and_verified();
+
+    // Neither beneficiary can withhold the other's money by refusing to act.
+    f.env.mock_auths(&[MockAuth {
+        address: &f.funder_b,
+        invoke: &MockAuthInvoke {
+            contract: &f.contract_id,
+            fn_name: "settle_milestone",
+            args: (m1, f.funder_b.clone()).into_val(&f.env),
+            sub_invokes: &[],
+        },
+    }]);
+    f.client.settle_milestone(&m1, &f.funder_b);
+
+    assert_eq!(f.client.get_milestone(&m1).status, MilestoneStatus::Settled);
+    assert_eq!(
+        f.balance(&f.supplier),
+        PRINCIPAL + (AMOUNT_M1 - REPAYMENT_B)
+    );
+}
+
+#[test]
+fn an_outsider_cannot_trigger_settlement() {
+    let f = setup();
+    let (_, m1, _) = f.financed_and_verified();
+
+    for impostor in [f.outsider.clone(), f.funder_a.clone(), f.attestor.clone()] {
+        f.env.mock_auths(&[MockAuth {
+            address: &impostor,
+            invoke: &MockAuthInvoke {
+                contract: &f.contract_id,
+                fn_name: "settle_milestone",
+                args: (m1, impostor.clone()).into_val(&f.env),
+                sub_invokes: &[],
+            },
+        }]);
+        assert_eq!(
+            f.client.try_settle_milestone(&m1, &impostor),
+            Err(Ok(Error::Unauthorized)),
+        );
+    }
+
+    f.env.mock_all_auths();
+    assert_eq!(f.escrow_balance(), AMOUNT_M1);
+}
+
+#[test]
+fn double_settlement_is_rejected() {
+    let f = setup();
+    let (_, m1, _) = f.financed_and_verified();
+    f.client.settle_milestone(&m1, &f.supplier);
+
+    let supplier_after = f.balance(&f.supplier);
+    let funder_after = f.balance(&f.funder_b);
+
+    assert_eq!(
+        f.client.try_settle_milestone(&m1, &f.supplier),
+        Err(Ok(Error::InvalidMilestoneStatus)),
+    );
+
+    // Nobody was paid twice.
+    assert_eq!(f.balance(&f.supplier), supplier_after);
+    assert_eq!(f.balance(&f.funder_b), funder_after);
+    assert_eq!(f.escrow_balance(), 0);
+}
+
+#[test]
+fn an_unverified_milestone_cannot_be_settled() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+
+    // Funded but not verified.
+    assert_eq!(
+        f.client.try_settle_milestone(&m1, &f.supplier),
+        Err(Ok(Error::InvalidMilestoneStatus)),
+    );
+
+    // Submitted but not yet attested.
+    f.client.submit_evidence(&m1, &f.evidence(1));
+    assert_eq!(
+        f.client.try_settle_milestone(&m1, &f.supplier),
+        Err(Ok(Error::InvalidMilestoneStatus)),
+    );
+    assert_eq!(f.escrow_balance(), AMOUNT_M1);
+}
+
+// ===========================================================================
+// PKG-04 — Disputes
+// ===========================================================================
+
+#[test]
+fn a_dispute_freezes_the_milestone() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+    f.client.submit_evidence(&m1, &f.evidence(1));
+
+    let dispute_id = f.client.open_dispute(&m1, &f.buyer);
+
+    let dispute = f.client.get_milestone_dispute(&m1);
+    assert_eq!(dispute.id, dispute_id);
+    assert_eq!(dispute.milestone_id, m1);
+    assert_eq!(dispute.opened_by, f.buyer);
+    assert_eq!(dispute.resolver, f.resolver);
+    assert_eq!(dispute.status, DisputeStatus::Open);
+    assert_eq!(
+        f.client.get_milestone(&m1).status,
+        MilestoneStatus::Disputed
+    );
+    // Escrow is frozen in place, not moved.
+    assert_eq!(f.escrow_balance(), AMOUNT_M1);
+}
+
+#[test]
+fn a_disputed_milestone_cannot_be_normally_settled() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+    f.client.submit_evidence(&m1, &f.evidence(1));
+    f.client.open_dispute(&m1, &f.buyer);
+
+    assert_eq!(
+        f.client.try_settle_milestone(&m1, &f.supplier),
+        Err(Ok(Error::InvalidMilestoneStatus)),
+    );
+    // Nor can it be attested around.
+    assert_eq!(
+        f.client.try_attest_milestone(&m1, &f.evidence(1)),
+        Err(Ok(Error::InvalidMilestoneStatus)),
+    );
+    assert_eq!(f.escrow_balance(), AMOUNT_M1);
+}
+
+#[test]
+fn both_counterparties_may_open_a_dispute() {
+    let f = setup();
+    let (_, m1, m2) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+    f.client.fund_milestone(&m2, &AMOUNT_M2, &f.usdc);
+
+    f.client.open_dispute(&m1, &f.buyer);
+    f.client.open_dispute(&m2, &f.supplier);
+
+    assert_eq!(f.client.get_milestone_dispute(&m1).opened_by, f.buyer);
+    assert_eq!(f.client.get_milestone_dispute(&m2).opened_by, f.supplier);
+}
+
+#[test]
+fn an_outsider_cannot_open_a_dispute() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+
+    for impostor in [f.outsider.clone(), f.attestor.clone(), f.funder_a.clone()] {
+        f.env.mock_auths(&[MockAuth {
+            address: &impostor,
+            invoke: &MockAuthInvoke {
+                contract: &f.contract_id,
+                fn_name: "open_dispute",
+                args: (m1, impostor.clone()).into_val(&f.env),
+                sub_invokes: &[],
+            },
+        }]);
+        assert_eq!(
+            f.client.try_open_dispute(&m1, &impostor),
+            Err(Ok(Error::Unauthorized)),
+        );
+    }
+
+    f.env.mock_all_auths();
+    assert_eq!(f.client.get_milestone(&m1).status, MilestoneStatus::Funded);
+}
+
+#[test]
+fn a_verified_milestone_cannot_be_dragged_into_dispute() {
+    let f = setup();
+    let (_, m1, _) = f.unfinanced_and_verified();
+
+    assert_eq!(
+        f.client.try_open_dispute(&m1, &f.buyer),
+        Err(Ok(Error::InvalidMilestoneStatus)),
+    );
+}
+
+#[test]
+fn a_dispute_cannot_be_opened_twice() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+    f.client.open_dispute(&m1, &f.buyer);
+
+    assert_eq!(
+        f.client.try_open_dispute(&m1, &f.supplier),
+        Err(Ok(Error::InvalidMilestoneStatus)),
+    );
+}
+
+#[test]
+fn the_wrong_resolver_cannot_resolve() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+    f.client.open_dispute(&m1, &f.buyer);
+
+    for impostor in [
+        f.buyer.clone(),
+        f.supplier.clone(),
+        f.attestor.clone(),
+        f.outsider.clone(),
+    ] {
+        f.env.mock_auths(&[MockAuth {
+            address: &impostor,
+            invoke: &MockAuthInvoke {
+                contract: &f.contract_id,
+                fn_name: "resolve_dispute",
+                args: (m1, DisputeResolution::Refund).into_val(&f.env),
+                sub_invokes: &[],
+            },
+        }]);
+        assert!(
+            f.client
+                .try_resolve_dispute(&m1, &DisputeResolution::Refund)
+                .is_err(),
+            "only the assigned resolver may resolve"
+        );
+    }
+
+    f.env.mock_all_auths();
+    assert_eq!(f.escrow_balance(), AMOUNT_M1);
+    assert_eq!(f.balance(&f.buyer), BUYER_INITIAL_BALANCE - AMOUNT_M1);
+}
+
+#[test]
+fn resolving_as_settle_returns_the_milestone_to_verified() {
+    let f = setup();
+    let (_, m1, _) = f.milestone_seeking_finance();
+    let (_, offer_b) = f.competing_offers(m1);
+    f.client.accept_offer(&offer_b);
+    f.client.fund_advance(&m1);
+    f.client.open_dispute(&m1, &f.buyer);
+
+    f.client.resolve_dispute(&m1, &DisputeResolution::Settle);
+
+    assert_eq!(
+        f.client.get_milestone(&m1).status,
+        MilestoneStatus::Verified
+    );
+    assert_eq!(
+        f.client.get_milestone_dispute(&m1).status,
+        DisputeStatus::ResolvedSettle
+    );
+
+    // The normal funder-first waterfall then applies.
+    f.client.settle_milestone(&m1, &f.supplier);
+    assert_eq!(
+        f.balance(&f.funder_b),
+        FUNDER_INITIAL_BALANCE - PRINCIPAL + REPAYMENT_B
+    );
+    assert_eq!(
+        f.balance(&f.supplier),
+        PRINCIPAL + (AMOUNT_M1 - REPAYMENT_B)
+    );
+    assert_eq!(f.escrow_balance(), 0);
+}
+
+#[test]
+fn refund_returns_escrow_to_the_buyer() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+    f.client.open_dispute(&m1, &f.buyer);
+
+    f.client.resolve_dispute(&m1, &DisputeResolution::Refund);
+
+    // The buyer is made whole for this milestone only.
+    assert_eq!(f.balance(&f.buyer), BUYER_INITIAL_BALANCE);
+    assert_eq!(f.escrow_balance(), 0);
+    assert_eq!(f.client.get_milestone(&m1).funded_amount, 0);
+    assert_eq!(
+        f.client.get_milestone(&m1).status,
+        MilestoneStatus::Refunded
+    );
+    assert_eq!(
+        f.client.get_milestone_dispute(&m1).status,
+        DisputeStatus::ResolvedRefund
+    );
+    // The supplier received nothing.
+    assert_eq!(f.balance(&f.supplier), 0);
+}
+
+#[test]
+fn a_refund_does_not_reverse_a_funder_advance() {
+    let f = setup();
+    let (_, m1, _) = f.milestone_seeking_finance();
+    let (_, offer_b) = f.competing_offers(m1);
+    f.client.accept_offer(&offer_b);
+    f.client.fund_advance(&m1);
+    f.client.open_dispute(&m1, &f.buyer);
+
+    f.client.resolve_dispute(&m1, &DisputeResolution::Refund);
+
+    // Buyer escrow goes back to the buyer.
+    assert_eq!(f.balance(&f.buyer), BUYER_INITIAL_BALANCE);
+    // But the advance already paid is NOT clawed back: it left the funder's
+    // wallet for the supplier's, and this contract cannot reach into either.
+    assert_eq!(f.balance(&f.supplier), PRINCIPAL);
+    assert_eq!(f.balance(&f.funder_b), FUNDER_INITIAL_BALANCE - PRINCIPAL);
+    // The position records that it ended without repayment from escrow.
+    let position = f.client.get_finance_position(&m1);
+    assert_eq!(position.status, FinancePositionStatus::Closed);
+    assert_eq!(position.principal, PRINCIPAL);
+    assert!(!f.client.has_active_finance_position(&m1));
+    assert_eq!(f.escrow_balance(), 0);
+}
+
+#[test]
+fn a_refunded_milestone_is_terminal() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+    f.client.open_dispute(&m1, &f.buyer);
+    f.client.resolve_dispute(&m1, &DisputeResolution::Refund);
+
+    assert_eq!(
+        f.client.try_settle_milestone(&m1, &f.supplier),
+        Err(Ok(Error::InvalidMilestoneStatus)),
+    );
+    assert_eq!(
+        f.client.try_fund_milestone(&m1, &AMOUNT_M1, &f.usdc),
+        Err(Ok(Error::InvalidMilestoneStatus)),
+    );
+    assert_eq!(
+        f.client.try_open_dispute(&m1, &f.buyer),
+        Err(Ok(Error::InvalidMilestoneStatus)),
+    );
+    assert_eq!(f.balance(&f.buyer), BUYER_INITIAL_BALANCE);
+}
+
+#[test]
+fn a_dispute_cannot_be_resolved_twice() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+    f.client.open_dispute(&m1, &f.buyer);
+    f.client.resolve_dispute(&m1, &DisputeResolution::Settle);
+
+    assert_eq!(
+        f.client
+            .try_resolve_dispute(&m1, &DisputeResolution::Refund),
+        Err(Ok(Error::InvalidMilestoneStatus)),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Dispute isolation — AGENT.md §9A.5
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_delivery_dispute_does_not_disturb_earlier_settled_milestones() {
+    let f = setup();
+    // A four-stage commercial order: raw materials, production, shipment,
+    // delivery. The contract knows none of those words; the labels live
+    // off-chain and only the amounts and evidence digests are on chain.
+    let order_id = f
+        .client
+        .create_order(&f.buyer, &f.supplier, &f.attestor, &f.resolver);
+    let stage = 500 * STROOPS_PER_UNIT;
+    let m1 = f.client.create_milestone(&order_id, &stage, &None);
+    let m2 = f.client.create_milestone(&order_id, &stage, &None);
+    let m3 = f.client.create_milestone(&order_id, &stage, &None);
+    let m4 = f.client.create_milestone(&order_id, &stage, &None);
+    f.client.accept_order(&order_id);
+
+    // M1-M3 run to settlement.
+    for (i, m) in [m1, m2, m3].iter().enumerate() {
+        f.client.fund_milestone(m, &stage, &f.usdc);
+        let hash = f.evidence((i as u8) + 1);
+        f.client.submit_evidence(m, &hash);
+        f.client.attest_milestone(m, &hash);
+        f.client.settle_milestone(m, &f.supplier);
+    }
+    let supplier_after_three = f.balance(&f.supplier);
+    assert_eq!(supplier_after_three, 3 * stage);
+
+    // M4 (delivery) is funded and then disputed.
+    f.client.fund_milestone(&m4, &stage, &f.usdc);
+    f.client.open_dispute(&m4, &f.buyer);
+
+    // Only M4 is frozen.
+    assert_eq!(
+        f.client.get_milestone(&m4).status,
+        MilestoneStatus::Disputed
+    );
+    for m in [m1, m2, m3] {
+        assert_eq!(f.client.get_milestone(&m).status, MilestoneStatus::Settled);
+        assert_eq!(f.client.get_milestone(&m).funded_amount, 0);
+    }
+    // Previously settled money is untouched, and only M4's escrow is held.
+    assert_eq!(f.balance(&f.supplier), supplier_after_three);
+    assert_eq!(f.escrow_balance(), stage);
+
+    // Refunding M4 returns only M4's escrow.
+    f.client.resolve_dispute(&m4, &DisputeResolution::Refund);
+    assert_eq!(f.balance(&f.supplier), supplier_after_three);
+    assert_eq!(f.escrow_balance(), 0);
+    assert_eq!(f.balance(&f.buyer), BUYER_INITIAL_BALANCE - 3 * stage);
+    // The order is finished: every milestone reached a terminal state.
+    assert_eq!(f.client.get_order(&order_id).status, OrderStatus::Completed);
+}
+
+#[test]
+fn settling_the_last_milestone_completes_the_order() {
+    let f = setup();
+    let (order_id, m1, m2) = f.active_order_with_two_milestones();
+
+    for (m, amount) in [(m1, AMOUNT_M1), (m2, AMOUNT_M2)] {
+        f.client.fund_milestone(&m, &amount, &f.usdc);
+        let hash = f.evidence(m as u8);
+        f.client.submit_evidence(&m, &hash);
+        f.client.attest_milestone(&m, &hash);
+        assert_eq!(f.client.get_order(&order_id).status, OrderStatus::Active);
+        f.client.settle_milestone(&m, &f.supplier);
+    }
+
+    assert_eq!(f.client.get_order(&order_id).status, OrderStatus::Completed);
+    assert_eq!(f.balance(&f.supplier), AMOUNT_M1 + AMOUNT_M2);
+    assert_eq!(f.escrow_balance(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// Deadlines — invariants 25 and 26
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_missed_deadline_moves_no_funds_and_changes_no_state() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    let deadline = f.now() + 60 * 60;
+    let m_deadlined = {
+        // A fresh order so the milestone can carry a deadline.
+        let order_id = f
+            .client
+            .create_order(&f.buyer, &f.supplier, &f.attestor, &f.resolver);
+        let m = f
+            .client
+            .create_milestone(&order_id, &AMOUNT_M1, &Some(deadline));
+        f.client.accept_order(&order_id);
+        f.client.fund_milestone(&m, &AMOUNT_M1, &f.usdc);
+        m
+    };
+    let _ = m1;
+
+    let before = f.client.get_milestone(&m_deadlined);
+    let escrow_before = f.escrow_balance();
+    let buyer_before = f.balance(&f.buyer);
+    let supplier_before = f.balance(&f.supplier);
+
+    // Sail past the deadline by a wide margin.
+    f.advance_time(30 * 24 * 60 * 60);
+
+    let after = f.client.get_milestone(&m_deadlined);
+    assert_eq!(after.status, before.status);
+    assert_eq!(after.funded_amount, before.funded_amount);
+    assert_eq!(after.deadline, Some(deadline));
+    assert_eq!(f.escrow_balance(), escrow_before);
+    assert_eq!(f.balance(&f.buyer), buyer_before);
+    assert_eq!(f.balance(&f.supplier), supplier_before);
+
+    // Expiry grants nobody a shortcut: settlement still needs verification,
+    // and a refund still needs an authorized dispute resolution.
+    assert_eq!(
+        f.client.try_settle_milestone(&m_deadlined, &f.supplier),
+        Err(Ok(Error::InvalidMilestoneStatus)),
+    );
+    assert_eq!(
+        f.client
+            .try_resolve_dispute(&m_deadlined, &DisputeResolution::Refund),
+        Err(Ok(Error::DisputeNotFound)),
+    );
+    assert_eq!(f.escrow_balance(), escrow_before);
+}
+
+#[test]
+fn a_late_milestone_still_settles_normally_once_verified() {
+    let f = setup();
+    let order_id = f
+        .client
+        .create_order(&f.buyer, &f.supplier, &f.attestor, &f.resolver);
+    let m = f
+        .client
+        .create_milestone(&order_id, &AMOUNT_M1, &Some(f.now() + 60));
+    f.client.accept_order(&order_id);
+    f.client.fund_milestone(&m, &AMOUNT_M1, &f.usdc);
+
+    // Delayed by weeks of sea freight, then delivered and verified.
+    f.advance_time(45 * 24 * 60 * 60);
+    let hash = f.evidence(3);
+    f.client.submit_evidence(&m, &hash);
+    f.client.attest_milestone(&m, &hash);
+    f.client.settle_milestone(&m, &f.supplier);
+
+    // Lateness carries no penalty in the contract.
+    assert_eq!(f.balance(&f.supplier), AMOUNT_M1);
+    assert_eq!(f.client.get_milestone(&m).status, MilestoneStatus::Settled);
+}
+
+// ---------------------------------------------------------------------------
+// Events
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_lifecycle_emits_its_events() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+
+    let hash = f.evidence(1);
+    f.client.submit_evidence(&m1, &hash);
+    assert_eq!(
+        f.last_event_name(),
+        Symbol::new(&f.env, "evidence_submitted")
+    );
+
+    f.client.open_dispute(&m1, &f.buyer);
+    assert_eq!(f.last_event_name(), Symbol::new(&f.env, "dispute_opened"));
+
+    f.client.resolve_dispute(&m1, &DisputeResolution::Settle);
+    assert_eq!(f.last_event_name(), Symbol::new(&f.env, "dispute_resolved"));
+
+    f.client.settle_milestone(&m1, &f.supplier);
+    assert_eq!(
+        f.last_event_name(),
+        Symbol::new(&f.env, "milestone_settled")
+    );
+}
+
+#[test]
+fn verification_and_refund_emit_their_events() {
+    let f = setup();
+    let (_, m1, m2) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+    let hash = f.evidence(1);
+    f.client.submit_evidence(&m1, &hash);
+    f.client.attest_milestone(&m1, &hash);
+    assert_eq!(
+        f.last_event_name(),
+        Symbol::new(&f.env, "milestone_verified")
+    );
+
+    f.client.fund_milestone(&m2, &AMOUNT_M2, &f.usdc);
+    f.client.open_dispute(&m2, &f.buyer);
+    f.client.resolve_dispute(&m2, &DisputeResolution::Refund);
+    // dispute_resolved is emitted last; the refund event precedes it.
+    assert_eq!(f.last_event_name(), Symbol::new(&f.env, "dispute_resolved"));
+    assert_eq!(f.balance(&f.buyer), BUYER_INITIAL_BALANCE - AMOUNT_M1);
+}
+
+// ===========================================================================
+// Phase 1 exit gate — the complete financial lifecycle
+// ===========================================================================
+
+#[test]
+fn the_full_milvance_lifecycle_works_end_to_end() {
+    let f = setup();
+
+    // create order -> create milestone
+    let order_id = f
+        .client
+        .create_order(&f.buyer, &f.supplier, &f.attestor, &f.resolver);
+    let m1 = f.client.create_milestone(&order_id, &AMOUNT_M1, &None);
+    f.client.accept_order(&order_id);
+
+    // fund milestone: buyer protects 2,000 without prepaying the supplier
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+    assert_eq!(f.escrow_balance(), AMOUNT_M1);
+    assert_eq!(
+        f.balance(&f.supplier),
+        0,
+        "buyer escrow is not supplier cash"
+    );
+
+    // request finance -> receive offers -> accept the better one
+    f.client
+        .request_finance(&m1, &PRINCIPAL, &(f.now() + REQUEST_TTL));
+    let (_, offer_b) = f.competing_offers(m1);
+    f.client.accept_offer(&offer_b);
+
+    // funder advances supplier from the funder's OWN capital
+    let escrow_before_advance = f.escrow_balance();
+    f.client.fund_advance(&m1);
+    assert_eq!(f.balance(&f.supplier), PRINCIPAL, "supplier has cash now");
+    assert_eq!(
+        f.escrow_balance(),
+        escrow_before_advance,
+        "buyer escrow untouched by the advance"
+    );
+    assert_eq!(f.balance(&f.funder_b), FUNDER_INITIAL_BALANCE - PRINCIPAL);
+
+    // submit evidence -> attestor verifies
+    let hash = f.evidence(42);
+    f.client.submit_evidence(&m1, &hash);
+    f.client.attest_milestone(&m1, &hash);
+    assert_eq!(
+        f.client.get_milestone(&m1).status,
+        MilestoneStatus::Verified
+    );
+
+    // funder-first settlement
+    f.client.settle_milestone(&m1, &f.supplier);
+
+    // Final position, matching AGENT.md §9.4 exactly.
+    assert_eq!(
+        f.balance(&f.funder_b),
+        FUNDER_INITIAL_BALANCE - PRINCIPAL + REPAYMENT_B
+    );
+    assert_eq!(f.balance(&f.supplier), 1_955 * STROOPS_PER_UNIT);
+    assert_eq!(f.balance(&f.buyer), BUYER_INITIAL_BALANCE - AMOUNT_M1);
+    assert_eq!(f.escrow_balance(), 0);
+    assert_eq!(f.client.get_milestone(&m1).status, MilestoneStatus::Settled);
+    assert_eq!(
+        f.client.get_finance_position(&m1).status,
+        FinancePositionStatus::Repaid
+    );
+    assert_eq!(f.client.get_order(&order_id).status, OrderStatus::Completed);
+}
+
+#[test]
+fn the_contract_stays_generic_across_a_shipment_scenario() {
+    let f = setup();
+    // Production / QC + handed to carrier / delivery confirmed — the same
+    // state machine, with no vessel, carrier, port, bill of lading or customs
+    // concept anywhere in the contract.
+    let order_id = f
+        .client
+        .create_order(&f.buyer, &f.supplier, &f.attestor, &f.resolver);
+    let stage = 400 * STROOPS_PER_UNIT;
+    let production = f.client.create_milestone(&order_id, &stage, &None);
+    let handed_to_carrier =
+        f.client
+            .create_milestone(&order_id, &stage, &Some(f.now() + 7 * 24 * 60 * 60));
+    let delivery = f
+        .client
+        .create_milestone(&order_id, &stage, &Some(f.now() + 30 * 24 * 60 * 60));
+    f.client.accept_order(&order_id);
+
+    // The buyer protects the shipment stage; a funder bridges the supplier's
+    // liquidity while the goods are in transit.
+    f.client.fund_milestone(&handed_to_carrier, &stage, &f.usdc);
+    f.client
+        .request_finance(&handed_to_carrier, &(stage / 2), &(f.now() + REQUEST_TTL));
+    let offer = f.client.make_offer(
+        &handed_to_carrier,
+        &f.funder_a,
+        &(stage / 2),
+        &(stage / 2 + STROOPS_PER_UNIT),
+        &(f.now() + OFFER_TTL),
+    );
+    f.client.accept_offer(&offer);
+    f.client.fund_advance(&handed_to_carrier);
+    assert_eq!(f.balance(&f.supplier), stage / 2);
+
+    // Weeks of sea freight pass; the deadline lapses and nothing moves.
+    let escrow_mid = f.escrow_balance();
+    f.advance_time(40 * 24 * 60 * 60);
+    assert_eq!(f.escrow_balance(), escrow_mid);
+
+    // Delivery is eventually evidenced and verified, late and unpenalised.
+    let hash = f.evidence(5);
+    f.client.submit_evidence(&handed_to_carrier, &hash);
+    f.client.attest_milestone(&handed_to_carrier, &hash);
+    f.client.settle_milestone(&handed_to_carrier, &f.supplier);
+
+    assert_eq!(
+        f.client.get_milestone(&handed_to_carrier).status,
+        MilestoneStatus::Settled
+    );
+    // Untouched siblings keep their own state.
+    assert_eq!(
+        f.client.get_milestone(&production).status,
+        MilestoneStatus::Unfunded
+    );
+    assert_eq!(
+        f.client.get_milestone(&delivery).status,
+        MilestoneStatus::Unfunded
+    );
+    assert_eq!(f.client.get_order(&order_id).status, OrderStatus::Active);
+    assert_eq!(f.escrow_balance(), 0);
 }
