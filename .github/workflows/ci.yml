@@ -34,6 +34,8 @@ jobs:
   contract:
     name: Soroban contract
     runs-on: ubuntu-latest
+    env:
+      STELLAR_CLI_VERSION: 28.0.0
     steps:
       - uses: actions/checkout@v4
 
@@ -50,16 +52,44 @@ jobs:
       # Prebuilt binary rather than `cargo install stellar-cli`: building from
       # source pulls libdbus-sys, whose system dependency (libdbus-1-dev) is not
       # present on ubuntu-latest, and took 13 minutes before failing.
+      - name: Cache Stellar CLI
+        id: stellar-cli-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/stellar
+          key: stellar-cli-${{ env.STELLAR_CLI_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
       - name: Install Stellar CLI
-        env:
-          STELLAR_CLI_VERSION: 28.0.0
+        if: steps.stellar-cli-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          url="https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
-          curl --proto '=https' --tlsv1.2 -fsSL "$url" -o /tmp/stellar-cli.tar.gz
-          tar -xzf /tmp/stellar-cli.tar.gz -C /tmp
-          install -m 0755 /tmp/stellar "$HOME/.cargo/bin/stellar"
-          stellar --version
+
+          case "$(uname -m)" in
+            x86_64)  target=x86_64-unknown-linux-gnu;  sha=207544486734fccb4df1afc4a7745478f9f1e21688b2f9506f0ef36f60ce3fdc ;;
+            aarch64) target=aarch64-unknown-linux-gnu; sha=8d8e5ea9bb441a19e99a7a7a4809df3f758c9654265c76953436fb7e9288b9ff ;;
+            *) echo "::error::unsupported runner architecture $(uname -m)"; exit 1 ;;
+          esac
+
+          archive="stellar-cli-${STELLAR_CLI_VERSION}-${target}.tar.gz"
+          url="https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/${archive}"
+          curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-delay 2 "$url" -o /tmp/stellar-cli.tar.gz
+
+          # The release publishes no checksum file, so the digest of the exact
+          # artifact is pinned here. A silently replaced release asset fails the
+          # build instead of running unverified code on a runner with repo
+          # credentials.
+          echo "${sha}  /tmp/stellar-cli.tar.gz" | sha256sum --check --strict
+
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf /tmp/stellar-cli.tar.gz -C /tmp stellar
+          install -m 0755 /tmp/stellar "$HOME/.local/bin/stellar"
+
+      - name: Verify Stellar CLI
+        run: |
+          set -euo pipefail
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/stellar" --version | tee /tmp/stellar-version
+          grep -q "^stellar ${STELLAR_CLI_VERSION} " /tmp/stellar-version
 
       - run: stellar contract build
 
