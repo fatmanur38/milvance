@@ -19,6 +19,13 @@ describe('@milvance/api config', () => {
   });
 
   it('defaults nodeEnv to development', () => {
-    expect(loadConfig({}).nodeEnv).toBe('development');
+    expect(
+      loadConfig({
+        DATABASE_URL: 'postgresql://localhost/milvance_test',
+        MILVANCE_CONTRACT_ID: 'CCN6AZHLN2BQPCDZWXJGA3NRJEJ56V5JK3M4VZ5QFKQ3NSJBN6RVTKRX',
+        USDC_ISSUER: 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5',
+        USDC_ASSET_CONTRACT_ID: 'CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA',
+      }).nodeEnv,
+    ).toBe('development');
   });
 });

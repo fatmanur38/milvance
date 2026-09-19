@@ -9,9 +9,9 @@
 
 ---
 
-> **Repository status:** The Phase 1 Soroban core is deployed on Stellar Testnet and
-> the minimal Freighter wallet surface is available at `/wallet`. Anchor integration,
-> backend and full product UI remain later packages — see [Roadmap](#roadmap-to-submission).
+> **Repository status:** The Phase 1 Soroban core, Freighter wallet flow, and
+> TRY ↔ USDC Anchor flow are live on Stellar Testnet. PKG-08 adds the PostgreSQL
+> read layer and event indexer. Product UI packages follow in the roadmap.
 
 ---
 
@@ -95,6 +95,7 @@ docs/                       Architecture, threat model, runbook, narrative, ADRs
 - Node `>= 20.19` (see `.nvmrc`) and pnpm `10.22`
 - Rust stable with the `wasm32v1-none` target
 - Stellar CLI `28.x`
+- PostgreSQL `14+` for the API read models
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -107,6 +108,8 @@ brew install stellar-cli        # or see https://developers.stellar.org
 ```bash
 pnpm install
 cp .env.example .env
+pnpm --filter @milvance/api db:generate
+pnpm --filter @milvance/api db:migrate
 
 pnpm lint         # ESLint across the workspace
 pnpm typecheck    # tsc --noEmit
@@ -124,6 +127,12 @@ pnpm verify            # everything above, in order
 Never commit `.env`, a secret key, or an Anchor JWT. Only `NEXT_PUBLIC_*` values
 reach the browser.
 
+For PKG-08, run `pnpm --filter @milvance/api indexer once` to backfill the
+deployed contract, then `pnpm --filter @milvance/api start` to serve the read API.
+The [API read layer guide](docs/API_READ_LAYER.md) covers PostgreSQL setup,
+replay, health checks, and evidence metadata. The API never signs a Soroban
+transaction; users continue to authorize financial actions in their wallets.
+
 ## Security posture
 
 - Stellar/Soroban is the financial source of truth; PostgreSQL is a read model.
@@ -140,7 +149,7 @@ reach the browser.
 | 1     | PKG-01…PKG-04  | Soroban financial core                           | ✅ done |
 | 2     | PKG-05, PKG-06 | Testnet deployment, Stellar Wallets Kit          | ✅ done |
 | 3     | PKG-07         | Anchor / local payments (TRY ↔ USDC)             | ✅ done |
-| 4     | PKG-08         | API, PostgreSQL read models, Soroban indexer     | ⬜ next |
+| 4     | PKG-08         | API, PostgreSQL read models, Soroban indexer     | ✅ done |
 | 5     | PKG-09…PKG-11  | Product UI, Trade Lab, public traction dashboard | ⬜      |
 | 6     | PKG-12         | Hardening, documentation, demo, submission       | ⬜      |
 
@@ -151,6 +160,7 @@ reach the browser.
 - [Demo runbook](docs/DEMO_RUNBOOK.md) — _TBD_
 - [Product narrative](docs/PRODUCT_NARRATIVE.md) — _TBD_
 - [Local payments (Anchor)](docs/ANCHOR_LOCAL_PAYMENTS.md)
+- [API read layer and indexer](docs/API_READ_LAYER.md)
 - [Architecture decision records](docs/adr/)
 
 ## Live deployment

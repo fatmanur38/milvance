@@ -12,6 +12,7 @@ export default tseslint.config(
       '**/.turbo/**',
       'target/**',
       'packages/contract-bindings/src/generated/**',
+      'apps/api/src/generated/**',
     ],
   },
   eslint.configs.recommended,

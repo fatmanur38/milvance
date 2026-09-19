@@ -1,0 +1,669 @@
+// Milvance read layer (AGENT.md §24, §25, PKG-08).
+//
+// STANDING RULE FOR THIS ENTIRE SCHEMA:
+//
+//   Soroban is the financial source of truth. Every table below that mirrors
+//   chain state is a PROJECTION. It is written only by the indexer, from events
+//   the deployed MilvanceCore actually emitted, and it may be dropped and
+//   rebuilt from chain at any time without changing financial truth.
+//
+// Consequences that are enforced elsewhere but explained here:
+//
+//   - No API route mutates a chain-derived column. Chain-derived resources are
+//     read-only over HTTP (see `chain-write-surface.test.ts`).
+//   - Money is NEVER a float and never a JS `number`. i128 asset amounts are
+//     `Decimal(39, 0)` — exact integer stroops-equivalent units, wide enough for
+//     the full i128 range — and are carried through TypeScript as `bigint` and
+//     serialised as decimal strings.
+//   - u64 chain identifiers are `BigInt`, never `Int`.
+//   - Nothing here stores a secret: no seed, no private key, no SEP-10 JWT, no
+//     KYC payload, no raw evidence bytes.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Raw event log + indexer control
+// ---------------------------------------------------------------------------
+
+/// Every contract event the indexer has durably accepted, in chain order.
+///
+/// This is the append-only substrate the normalized read models are projected
+/// from: deleting every read model and replaying this table (or re-reading the
+/// chain) must reproduce identical projections.
+///
+/// `eventId` is the Soroban RPC event id (`<toid>-<index>`), which is globally
+/// unique and lexicographically ordered. AGENT.md §25 specifies
+/// `ledger + tx hash + event index`; both are enforced as unique constraints so
+/// duplicate ingestion is impossible under either identity.
+model IndexedContractEvent {
+  id String @id @default(uuid())
+
+  // --- durable event identity ---
+  network    String
+  contractId String
+  eventId    String
+  ledger     BigInt
+  txHash     String
+  /// Index of this event within its transaction (suffix of the RPC event id).
+  eventIndex Int
+  /// Position of the transaction within the ledger, for deterministic ordering.
+  txIndex        Int
+  operationIndex Int
+
+  // --- decoded, public-safe payload ---
+  /// Lower snake-case contract event name, e.g. `order_created`.
+  eventName String
+  /// `true` when the emitting call succeeded. A reverted call's events are
+  /// recorded but never projected.
+  successful Boolean
+
+  ledgerClosedAt DateTime
+
+  /// Decoded topics and body, BigInts rendered as decimal strings.
+  /// Public-safe by construction: the contract never emits evidence bytes or KYC.
+  payload Json
+
+  /// Base64 XDR of the topics and value, kept separate from the normalized
+  /// projections above so replay and audit never depend on our decoder.
+  topicsXdr String[]
+  valueXdr  String
+
+  /// False when the decoder did not recognise the event name. The row is still
+  /// stored (auditability) but no projection is attempted.
+  projected Boolean @default(false)
+
+  ingestedAt DateTime @default(now())
+
+  @@unique([network, contractId, eventId], name: "event_rpc_identity")
+  @@unique([network, contractId, ledger, txHash, eventIndex], name: "event_chain_identity")
+  @@index([network, contractId, eventId])
+  @@index([eventName])
+  @@index([ledger])
+}
+
+/// One row per (network, contract) indexing stream.
+///
+/// The cursor advances ONLY inside the same transaction that persisted the
+/// events and their projections. A failure anywhere in a batch rolls the whole
+/// batch back, so the cursor can never point past an event that was not stored.
+model IndexerCursor {
+  id String @id @default(uuid())
+
+  network    String
+  contractId String
+
+  /// First ledger this stream is responsible for. Backfill starts here, so
+  /// history is never silently skipped.
+  startLedger BigInt
+
+  /// Soroban RPC paging cursor of the last accepted event, or null before the
+  /// first event. Resuming passes this straight back to `getEvents`.
+  lastEventId String?
+  /// Ledger of the last accepted event.
+  lastLedger BigInt?
+  /// Highest ledger scanned, even when it contained no events for us. Lets the
+  /// stream resume without rescanning empty ranges.
+  scannedThroughLedger BigInt?
+
+  eventsIngested BigInt @default(0)
+
+  lastPollAt    DateTime?
+  lastEventAt   DateTime?
+  lastErrorAt   DateTime?
+  /// Redacted, operator-facing failure summary. Never a token or a secret.
+  lastError String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([network, contractId], name: "cursor_stream")
+}
+
+// ---------------------------------------------------------------------------
+// Chain projections — derived, never independently mutable
+// ---------------------------------------------------------------------------
+
+/// Projection of `Order`. Field names follow the contract's own vocabulary.
+model OrderReadModel {
+  id String @id @default(uuid())
+
+  network    String
+  contractId String
+  /// Chain order id (`u64`).
+  orderId BigInt
+
+  buyer    String
+  supplier String
+  attestor String
+  resolver String
+  /// Settlement asset contract (USDC SAC), snapshotted on chain at creation.
+  asset String
+
+  /// Mirror of `OrderStatus`. Only the indexer writes this.
+  status OrderStatus @default(CREATED)
+
+  /// Ledger and transaction that created the order.
+  createdLedger BigInt
+  createdTxHash String
+  createdAt     DateTime
+
+  /// RPC event id of the newest event applied to this row. Projections are
+  /// monotonic in this value, which makes out-of-order replay a no-op.
+  lastEventId String
+  lastLedger  BigInt
+
+  milestones MilestoneReadModel[]
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([network, contractId, orderId], name: "order_identity")
+  @@index([buyer])
+  @@index([supplier])
+  @@index([status])
+}
+
+enum OrderStatus {
+  CREATED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+/// Projection of `Milestone`.
+///
+/// `fundedAmount` is BUYER ESCROW HELD BY THE CONTRACT. It is not a supplier
+/// balance and it is not the funder's advance — see `FinancePositionReadModel`
+/// for that, which is a separate row funded from separate money.
+model MilestoneReadModel {
+  id String @id @default(uuid())
+
+  network    String
+  contractId String
+  milestoneId BigInt
+  orderId     BigInt
+
+  order   OrderReadModel @relation(fields: [orderRowId], references: [id], onDelete: Cascade)
+  orderRowId String
+
+  /// Position within the order.
+  index Int
+
+  /// Protected milestone payment the buyer commits to escrow. i128.
+  amount Decimal @db.Decimal(39, 0)
+  /// Buyer escrow actually received so far. i128. Never exceeds `amount`.
+  fundedAmount Decimal @default(0) @db.Decimal(39, 0)
+
+  /// Informational target date. Expiry ALONE never moves funds (invariant 25);
+  /// any DELAYED-style status is computed at read time and never stored here.
+  deadline DateTime?
+
+  /// SHA-256 commitment, lower-case hex. The document itself stays off-chain.
+  evidenceHash String?
+
+  status MilestoneStatus @default(UNFUNDED)
+
+  createdLedger BigInt
+  createdTxHash String
+  createdAt     DateTime
+
+  lastEventId String
+  lastLedger  BigInt
+
+  financeRequest  FinanceRequestReadModel?
+  fundingOffers   FundingOfferReadModel[]
+  financePosition FinancePositionReadModel[]
+  disputes        DisputeReadModel[]
+  evidence        EvidenceObject[]
+  evidenceAnchors EvidenceAnchorReadModel[]
+  localPaymentCycle LocalPaymentCycleReadModel?
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([network, contractId, milestoneId], name: "milestone_identity")
+  @@index([orderId])
+  @@index([status])
+  @@index([deadline])
+}
+
+/// Mirrors the contract's `MilestoneStatus` exactly.
+///
+/// DELAYED and NEEDS_REVIEW are deliberately ABSENT: per invariant 26 they are
+/// derived read-model statuses computed from `deadline` at query time, and must
+/// never become stored state that could be mistaken for chain truth.
+enum MilestoneStatus {
+  UNFUNDED
+  FUNDED
+  FINANCE_REQUESTED
+  FINANCED
+  SUBMITTED
+  VERIFIED
+  DISPUTED
+  SETTLED
+  REFUNDED
+}
+
+/// Projection of `FinanceRequest`. One per milestone on chain.
+model FinanceRequestReadModel {
+  id String @id @default(uuid())
+
+  network    String
+  contractId String
+  milestoneId BigInt
+
+  milestone     MilestoneReadModel @relation(fields: [milestoneRowId], references: [id], onDelete: Cascade)
+  milestoneRowId String @unique
+
+  supplier            String
+  requestedPrincipal  Decimal @db.Decimal(39, 0)
+  /// Buyer escrow protecting the milestone at request time. Context only — a
+  /// funder underwrites against it, never draws from it.
+  protectedAmount Decimal @db.Decimal(39, 0)
+
+  status    FinanceRequestStatus @default(OPEN)
+  expiresAt DateTime
+
+  /// True when the request was closed because it had already lapsed.
+  cancelledWhileExpired Boolean?
+
+  createdLedger BigInt
+  createdTxHash String
+  createdAt     DateTime
+
+  lastEventId String
+  lastLedger  BigInt
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([network, contractId, milestoneId], name: "finance_request_identity")
+  @@index([status])
+}
+
+enum FinanceRequestStatus {
+  OPEN
+  ACCEPTED
+  CANCELLED
+}
+
+/// Projection of `FundingOffer`. Offers compete on `repayment`.
+model FundingOfferReadModel {
+  id String @id @default(uuid())
+
+  network    String
+  contractId String
+  offerId     BigInt
+  milestoneId BigInt
+
+  milestone      MilestoneReadModel @relation(fields: [milestoneRowId], references: [id], onDelete: Cascade)
+  milestoneRowId String
+
+  funder String
+  /// Advanced to the supplier from the FUNDER'S OWN capital, never from escrow.
+  principal Decimal @db.Decimal(39, 0)
+  /// Repaid to the funder first out of verified milestone escrow later.
+  repayment Decimal @db.Decimal(39, 0)
+
+  status    OfferStatus @default(OPEN)
+  expiresAt DateTime
+
+  createdLedger BigInt
+  createdTxHash String
+  createdAt     DateTime
+
+  lastEventId String
+  lastLedger  BigInt
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([network, contractId, offerId], name: "offer_identity")
+  @@index([milestoneId])
+  @@index([funder])
+  @@index([status])
+}
+
+enum OfferStatus {
+  OPEN
+  CANCELLED
+  ACCEPTED
+  FUNDED
+}
+
+/// Projection of `FinancePosition` — the funder's repayment claim.
+///
+/// At most one ACTIVE position may exist per milestone on chain (invariant 1).
+/// A partial unique index enforces the same thing here so a projection bug can
+/// never invent a second live financing.
+model FinancePositionReadModel {
+  id String @id @default(uuid())
+
+  network    String
+  contractId String
+  milestoneId BigInt
+  offerId     BigInt
+
+  milestone      MilestoneReadModel @relation(fields: [milestoneRowId], references: [id], onDelete: Cascade)
+  milestoneRowId String
+
+  funder   String
+  supplier String
+
+  /// Moved funder -> supplier at funding time. Buyer escrow was NOT touched.
+  principal Decimal @db.Decimal(39, 0)
+  /// Owed to the funder first out of verified milestone escrow.
+  repayment Decimal @db.Decimal(39, 0)
+  /// Buyer escrow protecting the milestone, emitted alongside the advance so the
+  /// separation of the two pools is visible in the read model too.
+  protectedAmountAtFunding Decimal @db.Decimal(39, 0)
+
+  status FinancePositionStatus @default(ACTIVE)
+
+  fundedLedger BigInt
+  fundedTxHash String
+  fundedAt     DateTime
+
+  /// Set when escrow settled and the funder was repaid.
+  repaidAt DateTime?
+  /// Set on the refund path: the position closed WITHOUT escrow repayment. The
+  /// advance is not clawed back; any remaining claim is off-chain.
+  closedAt DateTime?
+
+  lastEventId String
+  lastLedger  BigInt
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([network, contractId, milestoneId, offerId], name: "position_identity")
+  @@index([funder])
+  @@index([status])
+}
+
+enum FinancePositionStatus {
+  ACTIVE
+  REPAID
+  CLOSED
+}
+
+/// Projection of `Dispute`. Disputes are milestone-scoped so freezing one
+/// milestone never disturbs already-settled siblings.
+model DisputeReadModel {
+  id String @id @default(uuid())
+
+  network    String
+  contractId String
+  disputeId   BigInt
+  milestoneId BigInt
+
+  milestone      MilestoneReadModel @relation(fields: [milestoneRowId], references: [id], onDelete: Cascade)
+  milestoneRowId String
+
+  openedBy String
+  resolver String
+
+  status DisputeStatus @default(OPEN)
+
+  openedLedger BigInt
+  openedTxHash String
+  openedAt     DateTime
+
+  resolvedAt     DateTime?
+  resolvedTxHash String?
+
+  lastEventId String
+  lastLedger  BigInt
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([network, contractId, disputeId], name: "dispute_identity")
+  @@index([milestoneId])
+  @@index([status])
+}
+
+enum DisputeStatus {
+  OPEN
+  RESOLVED_SETTLE
+  RESOLVED_REFUND
+}
+
+/// Settlement payout breakdown, projected from `milestone_settled`.
+///
+/// Recorded separately from the milestone so the waterfall (funder first, then
+/// supplier) stays legible and auditable.
+model SettlementReadModel {
+  id String @id @default(uuid())
+
+  network    String
+  contractId String
+  milestoneId BigInt
+  orderId     BigInt
+
+  /// Total escrow released. Equals funderRepayment + supplierPayout.
+  protectedAmount Decimal @db.Decimal(39, 0)
+  /// Zero when the milestone was never financed.
+  funderRepayment Decimal @db.Decimal(39, 0)
+  supplierPayout  Decimal @db.Decimal(39, 0)
+
+  settledLedger BigInt
+  settledTxHash String
+  settledAt     DateTime
+
+  lastEventId String
+
+  @@unique([network, contractId, milestoneId], name: "settlement_identity")
+}
+
+/// Refund payout, projected from `milestone_refunded`.
+model RefundReadModel {
+  id String @id @default(uuid())
+
+  network    String
+  contractId String
+  milestoneId BigInt
+  orderId     BigInt
+
+  buyer          String
+  refundedAmount Decimal @db.Decimal(39, 0)
+  /// The funder's advance that this refund did NOT reverse. The supplier keeps
+  /// it; the funder's remaining claim is off-chain and unmodelled on chain.
+  funderAdvanceOutstanding Decimal @db.Decimal(39, 0)
+
+  refundedLedger BigInt
+  refundedTxHash String
+  refundedAt     DateTime
+
+  lastEventId String
+
+  @@unique([network, contractId, milestoneId], name: "refund_identity")
+}
+
+// ---------------------------------------------------------------------------
+// Off-chain metadata — normal CRUD is acceptable here
+// ---------------------------------------------------------------------------
+
+/// Metadata and a storage pointer for one off-chain evidence document.
+///
+/// The bytes NEVER live here and NEVER go on chain. The chain holds the SHA-256
+/// commitment; this row holds where the document is and what it claims to be.
+/// A row is only ANCHORED once the same digest is observed in an on-chain
+/// `evidence_submitted` event — until then it is an unverified upload.
+model EvidenceObject {
+  id String @id @default(uuid())
+
+  network    String
+  contractId String
+  /// Optional upload intent. The authoritative current commitment for each
+  /// milestone is EvidenceAnchorReadModel, since one digest may be reused.
+  milestoneId BigInt?
+
+  milestone      MilestoneReadModel? @relation(fields: [milestoneRowId], references: [id], onDelete: SetNull)
+  milestoneRowId String?
+
+  /// SHA-256 of the document bytes, lower-case hex, exactly 64 chars. This is
+  /// the value the contract stores as `BytesN<32>`.
+  contentHash String
+
+  /// Declared, sanitised filename. Never used to build a filesystem path.
+  filename String
+  mimeType String
+  byteSize BigInt
+
+  /// Opaque object-storage key. Generated from the digest, never from the
+  /// user-supplied filename, so a crafted name cannot traverse paths.
+  storageKey String
+  /// Which storage driver holds it, e.g. `local-dev` or `s3`.
+  storageDriver String
+
+  /// Stellar address of the uploader when known. A public key, never a secret.
+  uploadedBy String?
+
+  /// A document type LABEL ONLY — bill of lading, QC report, packing list.
+  /// The contract understands none of these; humans attest, Soroban enforces.
+  documentLabel String?
+
+  /// True once any on-chain `evidence_submitted` event carried this digest.
+  /// Current per-milestone anchoring lives in EvidenceAnchorReadModel.
+  anchoredOnChain Boolean   @default(false)
+  anchoredAt      DateTime?
+  anchoredTxHash  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([network, contractId, contentHash], name: "evidence_identity")
+  @@index([milestoneId])
+  @@index([anchoredOnChain])
+}
+
+/// Current on-chain evidence commitment for one milestone. A document digest
+/// may be reused by several milestones, and a supplier may replace an
+/// unverified submission; both cases require a milestone-scoped link.
+model EvidenceAnchorReadModel {
+  id String @id @default(uuid())
+  network String
+  contractId String
+  milestoneId BigInt
+  milestoneRowId String
+  milestone MilestoneReadModel @relation(fields: [milestoneRowId], references: [id], onDelete: Cascade)
+  contentHash String
+  submittedLedger BigInt
+  submittedTxHash String
+  submittedAt DateTime
+  lastEventId String
+
+  @@unique([network, contractId, milestoneId], name: "evidence_anchor_identity")
+  @@index([network, contractId, contentHash])
+}
+
+/// Public-safe record of one Anchor (SEP-6) local-payment transfer.
+///
+/// PKG-07 owns the protocol. This table only remembers what a completed leg
+/// looked like so product views can connect local money to chain money.
+///
+/// NEVER stored here: the SEP-10 JWT, any seed or private key, KYC documents,
+/// or bank account details.
+model AnchorTransaction {
+  id String @id @default(uuid())
+
+  network String
+  /// Anchor home domain, e.g. `tr-mock-anchor.fly.dev`.
+  anchorDomain String
+
+  direction AnchorDirection
+
+  /// The user's Stellar public key. A public value, never a secret.
+  walletAddress String
+
+  /// SEP-6 transfer id, when the authenticated flow surfaced one.
+  anchorTransactionId String?
+  /// On-chain leg, when one exists.
+  stellarTxHash String?
+
+  sourceAsset      String
+  sourceAmount     Decimal? @db.Decimal(39, 7)
+  destinationAsset String
+  destinationAmount Decimal? @db.Decimal(39, 7)
+
+  status String
+
+  /// SEP-38 quote reference and expiry. Not a credential.
+  quoteId       String?
+  quoteExpiresAt DateTime?
+
+  /// Anchor's own payout reference, recorded only when public-safe.
+  payoutReference String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([network, anchorDomain, anchorTransactionId], name: "anchor_transfer_identity")
+  @@index([walletAddress])
+  @@index([stellarTxHash])
+}
+
+enum AnchorDirection {
+  TRY_TO_USDC
+  USDC_TO_TRY
+}
+
+/// Consent-based onboarding metadata. This is not evidence of a contract action;
+/// public traction counts must separately require indexed chain events.
+model DemoParticipant {
+  id String @id @default(uuid())
+  network String
+  walletAddress String
+  isTeam Boolean @default(false)
+  consentToCount Boolean @default(false)
+  source String?
+  firstSeenAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([network, walletAddress], name: "participant_identity")
+}
+
+/// Daily counters materialised atomically alongside newly indexed contract
+/// events. Rebuilding the event stream rebuilds this cache as well.
+model AnalyticsDaily {
+  id String @id @default(uuid())
+  network String
+  contractId String
+  day DateTime @db.Date
+  ordersCreated Int @default(0)
+  milestonesFunded Int @default(0)
+  advancesFunded Int @default(0)
+  milestonesSettled Int @default(0)
+  milestonesRefunded Int @default(0)
+  disputesOpened Int @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([network, contractId, day], name: "daily_identity")
+}
+
+/// Candidate link between a local-payment record and a financed milestone.
+/// Only independently verified rows may contribute to completed-cycle metrics.
+/// PKG-08 has no path that marks a cycle verified from a browser assertion.
+model LocalPaymentCycleReadModel {
+  id String @id @default(uuid())
+  network String
+  contractId String
+  milestoneId BigInt
+  milestoneRowId String @unique
+  milestone MilestoneReadModel @relation(fields: [milestoneRowId], references: [id], onDelete: Cascade)
+  anchorTransactionId String?
+  status LocalPaymentCycleStatus @default(CANDIDATE)
+  verifiedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([network, contractId, milestoneId], name: "cycle_identity")
+  @@index([status])
+}
+
+enum LocalPaymentCycleStatus {
+  CANDIDATE
+  VERIFIED
+}

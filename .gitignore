@@ -30,6 +30,12 @@ coverage/
 *.tsbuildinfo
 .eslintcache
 
+# Prisma Client is generated from prisma/schema.prisma at install/build time.
+# Committing it would let a stale client drift from the committed migrations.
+/apps/api/src/generated/
+/.evidence-store/
+/.evidence-test/
+
 # --- Rust / Soroban ---
 target/
 **/*.rs.bk

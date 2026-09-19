@@ -13,3 +13,4 @@ MILVANCE_SSOT.md
 next-env.d.ts
 contracts/**/test_snapshots/
 packages/contract-bindings/src/generated/
+apps/api/src/generated/

@@ -1,6 +1,8 @@
 # Milvance — Architecture
 
-> **Status:** placeholder (PKG-00). Completed in **PKG-12**.
+> **Status:** evolving overview. PKG-08 read-layer design is documented in
+> [API read layer and indexer](API_READ_LAYER.md); final submission architecture
+> documentation remains scheduled for PKG-12.
 
 ## System shape
 
@@ -17,7 +19,7 @@ Anchor / SEP                 (local-money edge, TRY ↔ USDC — PKG-07)
 
 Soroban Events
    ↓
-Indexer                      (PKG-08)
+Indexer                      (PKG-08 complete)
    ↓
 PostgreSQL Read Models       (cache/metadata/analytics — never financial truth)
    ↓
@@ -42,3 +44,4 @@ Web UI / Metrics             (PKG-09…PKG-11)
 - [ ] Anchor adapter boundary and SEP sequence diagrams
 - [ ] Wallet authorization flow
 - [ ] Read-model rebuild procedure
+- [x] PKG-08 event ingestion, cursor, read-model rebuild, and authority boundary

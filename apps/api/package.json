@@ -2,25 +2,37 @@
   "name": "@milvance/api",
   "version": "0.0.0",
   "private": true,
-  "description": "Milvance backend — read models, Anchor orchestration and event indexing. Never a financial ledger.",
+  "description": "Milvance backend \u2014 read models, Anchor orchestration and event indexing. Never a financial ledger.",
   "scripts": {
     "dev": "node --watch dist/main.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
     "start": "node dist/main.js",
-    "test": "vitest run"
+    "test": "vitest run --no-file-parallelism",
+    "postinstall": "prisma generate",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "indexer": "node dist/indexer/indexer.main.js"
   },
   "dependencies": {
+    "@milvance/contract-bindings": "workspace:*",
     "@milvance/shared": "workspace:*",
     "@nestjs/common": "12.0.3",
     "@nestjs/core": "12.0.3",
     "@nestjs/platform-express": "12.0.3",
+    "@prisma/adapter-pg": "7.10.0",
+    "@prisma/client": "7.10.0",
+    "@stellar/stellar-sdk": "16.0.1",
+    "dotenv": "18.0.1",
+    "pg": "8.23.0",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2"
   },
   "devDependencies": {
     "@types/node": "20.19.9",
+    "@types/pg": "8.23.1",
+    "prisma": "7.10.0",
     "typescript": "5.9.3",
     "vitest": "4.1.11"
   }

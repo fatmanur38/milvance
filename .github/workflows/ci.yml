@@ -13,6 +13,23 @@ jobs:
   web:
     name: Node workspace
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://milvance:milvance@localhost:5432/milvance_test
+      TEST_DATABASE_URL: postgresql://milvance:milvance@localhost:5432/milvance_test
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: milvance
+          POSTGRES_PASSWORD: milvance
+          POSTGRES_DB: milvance_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U milvance -d milvance_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -24,6 +41,9 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter @milvance/api db:generate
+      - run: pnpm --filter @milvance/api db:migrate
 
       - run: pnpm format:check
       - run: pnpm lint
