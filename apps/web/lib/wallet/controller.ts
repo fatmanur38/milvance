@@ -161,6 +161,26 @@ export class WalletController {
     this.update({ phase: 'disconnected' });
   }
 
+  /**
+   * Signs an arbitrary transaction XDR with the connected wallet.
+   *
+   * Used by the local-payment flows for two things the contract path does not
+   * cover: the Anchor's SEP-10 sign-in challenge, and the USDC payment that
+   * settles a withdrawal. Both are ordinary Stellar transactions the user must
+   * authorize themselves, and routing them through the controller keeps the
+   * network and account guards in `FreighterWallet.signTransaction` applying to
+   * every signature the app requests.
+   *
+   * Returns the signed XDR. It never sees a secret key.
+   */
+  async signRaw(xdr: string): Promise<string> {
+    const address = this.state.address;
+    if (this.state.phase !== 'connected' || address === undefined) {
+      throw new Error('Connect your wallet before signing.');
+    }
+    return this.wallet.signTransaction(xdr, address);
+  }
+
   async refresh(): Promise<void> {
     if (!this.state.address || this.busy) return;
     try {

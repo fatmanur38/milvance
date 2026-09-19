@@ -32,7 +32,13 @@ export default function HomePage(): React.ReactElement {
         </div>
         <div>
           <dt className="font-medium">Anchor</dt>
-          <dd className="opacity-80">The local-money edge: TRY in, TRY out, Stellar in between.</dd>
+          <dd className="opacity-80">
+            The local-money edge: TRY in, TRY out, Stellar in between.{' '}
+            <a className="underline" href="/anchor">
+              Open local money
+            </a>
+            .
+          </dd>
         </div>
       </dl>
 

@@ -2,7 +2,7 @@
   "name": "@milvance/web",
   "version": "0.0.0",
   "private": true,
-  "description": "Milvance web app — buyer, supplier, funder and attestor flows",
+  "description": "Milvance web app \u2014 buyer, supplier, funder and attestor flows",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@creit.tech/stellar-wallets-kit": "2.6.0",
+    "@milvance/anchor": "workspace:*",
     "@milvance/contract-bindings": "workspace:*",
     "@milvance/shared": "workspace:*",
     "@milvance/stellar": "workspace:*",

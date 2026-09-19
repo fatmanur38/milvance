@@ -2,7 +2,7 @@
   "name": "@milvance/anchor",
   "version": "0.0.0",
   "private": true,
-  "description": "Stellar Anchor (SEP) adapter boundary — implemented in PKG-07",
+  "description": "Stellar Anchor (SEP) adapter boundary \u2014 implemented in PKG-07",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -22,6 +22,7 @@
     "test": "vitest run"
   },
   "devDependencies": {
+    "@types/node": "20.19.9",
     "typescript": "5.9.3",
     "vitest": "4.1.11"
   }

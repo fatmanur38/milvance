@@ -1,24 +1,33 @@
 /**
- * @milvance/anchor — Stellar Anchor (SEP) adapter boundary.
+ * @milvance/anchor — the local-money edge of Milvance (PKG-07).
  *
- * ⚠️ PKG-00 placeholder. Implemented in **PKG-07**.
+ * Milvance settles in Stellar USDC, but a Turkish supplier pays for materials,
+ * labour and local logistics in TRY. This package is what turns local money
+ * into programmable Stellar liquidity and back again:
  *
- * Design constraints fixed by AGENT.md §21 / §4.3, to be honoured when this
- * package is implemented:
+ * ```text
+ * TRY → Anchor → USDC → protected milestones and funder advances
+ * funder advance → USDC → Anchor → TRY → production starts
+ * ```
  *
- * - Anchor is the local-money edge of the product (TRY ↔ USDC), not a decorative
- *   withdrawal button, and not an optional settings page.
- * - All Anchor access goes through a replaceable `AnchorProvider` interface so the
- *   hackathon mock can be swapped for a production Anchor without touching domain code.
- * - Mock bank-transfer behaviour lives in an isolated `MockAnchorDevDriver`, never
- *   inlined into domain logic.
- * - Relevant SEPs: SEP-1, SEP-10, SEP-12, SEP-38, SEP-6. Do not assume SEP-24.
- * - The SEP-10 challenge is signed by the *user's* wallet. JWTs are never logged,
- *   never committed, and never stored long-lived in plaintext.
- *
- * The `AnchorProvider` interface is deliberately NOT declared here: defining it is
- * part of PKG-07's approved scope.
+ * All access goes through {@link AnchorProvider}. Hackathon-only simulation is
+ * isolated in {@link MockAnchorDevDriver} and is never reachable from the
+ * standard SEP path.
  */
 
-/** Marker export so the package has a stable, importable surface before PKG-07. */
-export const ANCHOR_ADAPTER_IMPLEMENTED = false as const;
+export { AnchorError, explain } from './errors.js';
+export type { AnchorErrorCode } from './errors.js';
+
+export { parseStellarToml, requireCurrency } from './toml.js';
+
+export type { AnchorProvider, FetchLike } from './provider.js';
+export { SepAnchorProvider } from './sep-provider.js';
+export type { SepAnchorProviderOptions } from './sep-provider.js';
+
+export { MockAnchorDevDriver } from './mock-driver.js';
+export type { MockAnchorDevDriverOptions, SimulateBankTransferInput } from './mock-driver.js';
+
+export * from './types.js';
+
+/** The adapter is implemented as of PKG-07. */
+export const ANCHOR_ADAPTER_IMPLEMENTED = true as const;

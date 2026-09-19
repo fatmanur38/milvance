@@ -139,8 +139,8 @@ reach the browser.
 | 0     | PKG-00         | Repository, tooling, CI, guardrails              | ✅ done |
 | 1     | PKG-01…PKG-04  | Soroban financial core                           | ✅ done |
 | 2     | PKG-05, PKG-06 | Testnet deployment, Stellar Wallets Kit          | ✅ done |
-| 3     | PKG-07         | Anchor / local payments (TRY ↔ USDC)             | ⬜      |
-| 4     | PKG-08         | API, PostgreSQL read models, Soroban indexer     | ⬜      |
+| 3     | PKG-07         | Anchor / local payments (TRY ↔ USDC)             | ✅ done |
+| 4     | PKG-08         | API, PostgreSQL read models, Soroban indexer     | ⬜ next |
 | 5     | PKG-09…PKG-11  | Product UI, Trade Lab, public traction dashboard | ⬜      |
 | 6     | PKG-12         | Hardening, documentation, demo, submission       | ⬜      |
 
@@ -150,6 +150,7 @@ reach the browser.
 - [Threat model](docs/THREAT_MODEL.md) — _TBD_
 - [Demo runbook](docs/DEMO_RUNBOOK.md) — _TBD_
 - [Product narrative](docs/PRODUCT_NARRATIVE.md) — _TBD_
+- [Local payments (Anchor)](docs/ANCHOR_LOCAL_PAYMENTS.md)
 - [Architecture decision records](docs/adr/)
 
 ## Live deployment

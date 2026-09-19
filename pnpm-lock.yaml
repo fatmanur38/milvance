@@ -66,6 +66,9 @@ importers:
       '@creit.tech/stellar-wallets-kit':
         specifier: 2.6.0
         version: 2.6.0(@types/react@19.3.0)(bufferutil@4.1.0)(near-api-js@5.1.1)(react@19.3.0)(tslib@2.8.1)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
+      '@milvance/anchor':
+        specifier: workspace:*
+        version: link:../../packages/anchor
       '@milvance/contract-bindings':
         specifier: workspace:*
         version: link:../../packages/contract-bindings
@@ -112,6 +115,9 @@ importers:
 
   packages/anchor:
     devDependencies:
+      '@types/node':
+        specifier: 20.19.9
+        version: 20.19.9
       typescript:
         specifier: 5.9.3
         version: 5.9.3
