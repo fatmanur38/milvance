@@ -262,3 +262,35 @@ pub struct OrderCompleted {
     #[topic]
     pub order_id: u64,
 }
+
+/// The buyer unwound an incomplete funding attempt.
+///
+/// Emitted only while the milestone is still short of its protected amount. No
+/// financing exists at this point, so nothing but the buyer's own partial
+/// deposit moves, and it moves back to the buyer.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PartialFundingCancelled {
+    #[topic]
+    pub order_id: u64,
+    #[topic]
+    pub milestone_id: u64,
+    pub buyer: Address,
+    /// The partial escrow returned; the milestone drops back to zero funded.
+    pub amount: i128,
+}
+
+/// The supplier closed a finance request that never produced a funded advance.
+///
+/// The milestone returns to `Funded` — still fully protected, simply no longer
+/// seeking financing. No value moves: a request is an invitation, not a
+/// transfer.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FinanceRequestCancelled {
+    #[topic]
+    pub milestone_id: u64,
+    pub supplier: Address,
+    /// True when the request had already lapsed rather than being withdrawn.
+    pub was_expired: bool,
+}

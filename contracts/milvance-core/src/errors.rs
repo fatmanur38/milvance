@@ -88,4 +88,10 @@ pub enum Error {
     InvalidDisputeStatus = 75,
     /// The milestone holds no escrow to pay out or return.
     NothingToSettle = 76,
+
+    // --- Phase 1 liveness recovery ---
+    /// The milestone holds no partial escrow to unwind.
+    NoPartialFunding = 77,
+    /// An offer has already been selected, so the request cannot be cancelled.
+    OfferAlreadyAccepted = 78,
 }

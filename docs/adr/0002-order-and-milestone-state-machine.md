@@ -257,6 +257,50 @@ A missed deadline therefore cannot settle, refund, repay or penalize by itself
 — sea freight is delayed by weather, congestion, customs and carrier schedules,
 none of which are the supplier's fault.
 
+### 25. Incomplete funding is unwindable by the buyer (Phase 1 liveness)
+
+Partial deposits accumulate while a milestone is `Unfunded` (decision 13). A
+buyer who funded half and then stopped had no exit: a milestone cannot be
+evidenced, financed or disputed from `Unfunded`, so the partial deposit would
+sit in escrow with nothing able to move it.
+
+`cancel_partial_funding(milestone_id)` returns exactly that partial escrow to
+the buyer and leaves the milestone `Unfunded` with zero funded, ready to be
+funded again.
+
+It is **not** a general withdrawal. The status guard closes the path the moment
+escrow reaches the full amount and the milestone becomes `Funded`: buyer
+protection, once established, is not revocable. Five further guards — no
+evidence, no live finance request, no accepted offer, no finance position, no
+open dispute — are redundant given that guard, and are kept as independent
+barriers so a future change to the status check cannot quietly open a
+withdrawal path over live financing.
+
+No new milestone state: the status is never reassigned at all.
+
+### 26. An unanswered finance request is withdrawable by the supplier (Phase 1 liveness)
+
+A supplier could request financing, receive no acceptable offer, and still
+complete the work — but `FINANCE_REQUESTED` had no exit that did not involve a
+funder. `submit_evidence` accepts `Funded` and `Financed`, not
+`FinanceRequested`, so the supplier was stuck.
+
+`cancel_finance_request(milestone_id)` closes an `Open` request — whether
+voluntarily withdrawn or simply lapsed, since both leave it `Open` — and returns
+the milestone to `Funded`. Still fully protected, simply no longer seeking
+financing. The supplier can then finish unfinanced, or open a fresh round later.
+
+Refused once an offer has been accepted or a position funded: that is
+[decision 19]'s territory, and real financing is never unwound here. Outstanding
+offers become unacceptable because the request is closed, and the offer index is
+cleared so they are not presented as selectable.
+
+No value moves — a request is an invitation, not a transfer — and no new
+milestone state is introduced.
+
+Together with decision 19, every Phase 1 state a party can be left waiting in
+now has an authorized exit that does not depend on a counterparty acting.
+
 ## Consequences
 
 - PKG-02 added escrow to `Milestone.funded_amount` without weakening any guard

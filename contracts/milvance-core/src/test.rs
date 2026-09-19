@@ -3574,3 +3574,408 @@ fn the_contract_stays_generic_across_a_shipment_scenario() {
     assert_eq!(f.client.get_order(&order_id).status, OrderStatus::Active);
     assert_eq!(f.escrow_balance(), 0);
 }
+
+// ===========================================================================
+// Phase 1 liveness — FIX 1: partial funding recovery
+// ===========================================================================
+
+#[test]
+fn the_buyer_can_unwind_an_incomplete_funding_attempt() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    let partial = AMOUNT_M1 / 2;
+    f.client.fund_milestone(&m1, &partial, &f.usdc);
+
+    let returned = f.client.cancel_partial_funding(&m1);
+
+    assert_eq!(returned, partial);
+    // Escrow returns to exactly zero, and the status never changed.
+    assert_eq!(f.client.get_milestone(&m1).funded_amount, 0);
+    assert_eq!(
+        f.client.get_milestone(&m1).status,
+        MilestoneStatus::Unfunded
+    );
+    assert!(!f.client.is_fully_funded(&m1));
+}
+
+#[test]
+fn partial_recovery_moves_exactly_the_partial_amount() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    let partial = AMOUNT_M1 / 4;
+    f.client.fund_milestone(&m1, &partial, &f.usdc);
+
+    let escrow_before = f.escrow_balance();
+    let buyer_before = f.balance(&f.buyer);
+
+    f.client.cancel_partial_funding(&m1);
+
+    // Contract balance decreases by exactly the partial amount.
+    assert_eq!(f.escrow_balance(), escrow_before - partial);
+    assert_eq!(f.escrow_balance(), 0);
+    // Buyer balance increases by exactly the partial amount.
+    assert_eq!(f.balance(&f.buyer), buyer_before + partial);
+    assert_eq!(f.balance(&f.buyer), BUYER_INITIAL_BALANCE);
+    // Nobody else received anything.
+    assert_eq!(f.balance(&f.supplier), 0);
+}
+
+#[test]
+fn partial_recovery_accumulates_multiple_deposits() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &(AMOUNT_M1 / 4), &f.usdc);
+    f.client.fund_milestone(&m1, &(AMOUNT_M1 / 4), &f.usdc);
+
+    let returned = f.client.cancel_partial_funding(&m1);
+
+    assert_eq!(returned, AMOUNT_M1 / 2);
+    assert_eq!(f.balance(&f.buyer), BUYER_INITIAL_BALANCE);
+    assert_eq!(f.escrow_balance(), 0);
+}
+
+#[test]
+fn a_fully_funded_milestone_cannot_use_the_partial_recovery_path() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+
+    // Buyer protection is not revocable once the milestone is protected.
+    assert_eq!(
+        f.client.try_cancel_partial_funding(&m1),
+        Err(Ok(Error::InvalidMilestoneStatus)),
+    );
+    assert_eq!(f.escrow_balance(), AMOUNT_M1);
+    assert_eq!(f.client.get_milestone(&m1).funded_amount, AMOUNT_M1);
+}
+
+#[test]
+fn partial_recovery_requires_some_partial_escrow() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+
+    assert_eq!(
+        f.client.try_cancel_partial_funding(&m1),
+        Err(Ok(Error::NoPartialFunding)),
+    );
+}
+
+#[test]
+fn only_the_buyer_may_unwind_partial_funding() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    let partial = AMOUNT_M1 / 2;
+    f.client.fund_milestone(&m1, &partial, &f.usdc);
+
+    for impostor in [
+        f.supplier.clone(),
+        f.outsider.clone(),
+        f.funder_a.clone(),
+        f.attestor.clone(),
+    ] {
+        f.env.mock_auths(&[MockAuth {
+            address: &impostor,
+            invoke: &MockAuthInvoke {
+                contract: &f.contract_id,
+                fn_name: "cancel_partial_funding",
+                args: (m1,).into_val(&f.env),
+                sub_invokes: &[],
+            },
+        }]);
+        assert!(
+            f.client.try_cancel_partial_funding(&m1).is_err(),
+            "only the buyer may unwind their own partial deposit"
+        );
+    }
+
+    f.env.mock_all_auths();
+    assert_eq!(f.escrow_balance(), partial);
+    assert_eq!(f.client.get_milestone(&m1).funded_amount, partial);
+}
+
+#[test]
+fn partial_recovery_leaves_other_milestones_untouched() {
+    let f = setup();
+    let (_, m1, m2) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &(AMOUNT_M1 / 2), &f.usdc);
+    f.client.fund_milestone(&m2, &AMOUNT_M2, &f.usdc);
+
+    f.client.cancel_partial_funding(&m1);
+
+    // M2 keeps its full protection.
+    assert_eq!(f.client.get_milestone(&m2).funded_amount, AMOUNT_M2);
+    assert_eq!(f.client.get_milestone(&m2).status, MilestoneStatus::Funded);
+    assert_eq!(f.escrow_balance(), AMOUNT_M2);
+}
+
+#[test]
+fn partial_recovery_cannot_reach_a_financed_milestone() {
+    let f = setup();
+    let (_, m1, _) = f.milestone_seeking_finance();
+    let (_, offer_b) = f.competing_offers(m1);
+    f.client.accept_offer(&offer_b);
+    f.client.fund_advance(&m1);
+
+    // A financed milestone is protected and carries a live position.
+    assert_eq!(
+        f.client.try_cancel_partial_funding(&m1),
+        Err(Ok(Error::InvalidMilestoneStatus)),
+    );
+    assert_eq!(f.escrow_balance(), AMOUNT_M1);
+    assert_eq!(
+        f.client.get_finance_position(&m1).status,
+        FinancePositionStatus::Active
+    );
+    assert_eq!(f.balance(&f.supplier), PRINCIPAL);
+}
+
+#[test]
+fn the_buyer_can_refund_and_then_fund_the_milestone_properly() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &(AMOUNT_M1 / 2), &f.usdc);
+    f.client.cancel_partial_funding(&m1);
+
+    // The milestone is reusable: fund it fully this time.
+    f.client.fund_milestone(&m1, &AMOUNT_M1, &f.usdc);
+
+    assert_eq!(f.client.get_milestone(&m1).status, MilestoneStatus::Funded);
+    assert!(f.client.is_fully_funded(&m1));
+    assert_eq!(f.escrow_balance(), AMOUNT_M1);
+    assert_eq!(f.balance(&f.buyer), BUYER_INITIAL_BALANCE - AMOUNT_M1);
+}
+
+#[test]
+fn partial_recovery_emits_its_event() {
+    let f = setup();
+    let (_, m1, _) = f.active_order_with_two_milestones();
+    f.client.fund_milestone(&m1, &(AMOUNT_M1 / 2), &f.usdc);
+
+    f.client.cancel_partial_funding(&m1);
+
+    assert_eq!(
+        f.last_event_name(),
+        Symbol::new(&f.env, "partial_funding_cancelled")
+    );
+}
+
+// ===========================================================================
+// Phase 1 liveness — FIX 2: finance request cancellation
+// ===========================================================================
+
+#[test]
+fn the_supplier_can_withdraw_a_live_finance_request() {
+    let f = setup();
+    let (_, m1, _) = f.milestone_seeking_finance();
+
+    let was_expired = f.client.cancel_finance_request(&m1);
+
+    assert!(!was_expired);
+    assert_eq!(
+        f.client.get_finance_request(&m1).status,
+        FinanceRequestStatus::Cancelled
+    );
+    // Still fully protected, simply no longer seeking financing.
+    assert_eq!(f.client.get_milestone(&m1).status, MilestoneStatus::Funded);
+    assert!(f.client.is_fully_funded(&m1));
+}
+
+#[test]
+fn the_supplier_can_close_an_expired_finance_request() {
+    let f = setup();
+    let (_, m1, _) = f.milestone_seeking_finance();
+    f.advance_time(REQUEST_TTL + 1);
+
+    let was_expired = f.client.cancel_finance_request(&m1);
+
+    assert!(was_expired);
+    assert_eq!(
+        f.client.get_finance_request(&m1).status,
+        FinanceRequestStatus::Cancelled
+    );
+    assert_eq!(f.client.get_milestone(&m1).status, MilestoneStatus::Funded);
+}
+
+#[test]
+fn cancelling_a_finance_request_moves_no_tokens() {
+    let f = setup();
+    let (_, m1, _) = f.milestone_seeking_finance();
+    f.competing_offers(m1);
+
+    let escrow_before = f.escrow_balance();
+    let protected_before = f.client.get_milestone(&m1).funded_amount;
+
+    f.client.cancel_finance_request(&m1);
+
+    // A request is an invitation, not a transfer: nothing to unwind.
+    assert_eq!(f.escrow_balance(), escrow_before);
+    assert_eq!(f.escrow_balance(), AMOUNT_M1);
+    assert_eq!(f.client.get_milestone(&m1).funded_amount, protected_before);
+    assert_eq!(f.balance(&f.buyer), BUYER_INITIAL_BALANCE - AMOUNT_M1);
+    assert_eq!(f.balance(&f.supplier), 0);
+    assert_eq!(f.balance(&f.funder_a), FUNDER_INITIAL_BALANCE);
+    assert_eq!(f.balance(&f.funder_b), FUNDER_INITIAL_BALANCE);
+}
+
+#[test]
+fn only_the_supplier_may_cancel_a_finance_request() {
+    let f = setup();
+    let (_, m1, _) = f.milestone_seeking_finance();
+
+    for impostor in [
+        f.buyer.clone(),
+        f.outsider.clone(),
+        f.funder_a.clone(),
+        f.attestor.clone(),
+    ] {
+        f.env.mock_auths(&[MockAuth {
+            address: &impostor,
+            invoke: &MockAuthInvoke {
+                contract: &f.contract_id,
+                fn_name: "cancel_finance_request",
+                args: (m1,).into_val(&f.env),
+                sub_invokes: &[],
+            },
+        }]);
+        assert!(
+            f.client.try_cancel_finance_request(&m1).is_err(),
+            "only the supplier may withdraw their own financing request"
+        );
+    }
+
+    f.env.mock_all_auths();
+    assert_eq!(
+        f.client.get_finance_request(&m1).status,
+        FinanceRequestStatus::Open
+    );
+}
+
+#[test]
+fn a_finance_request_cannot_be_cancelled_after_an_offer_is_accepted() {
+    let f = setup();
+    let (_, m1, _) = f.milestone_seeking_finance();
+    let (_, offer_b) = f.competing_offers(m1);
+    f.client.accept_offer(&offer_b);
+
+    assert_eq!(
+        f.client.try_cancel_finance_request(&m1),
+        Err(Ok(Error::OfferAlreadyAccepted)),
+    );
+    assert_eq!(f.client.get_accepted_offer(&m1).repayment, REPAYMENT_B);
+}
+
+#[test]
+fn a_finance_request_cannot_be_cancelled_after_an_advance_is_funded() {
+    let f = setup();
+    let (_, m1, _) = f.milestone_seeking_finance();
+    let (_, offer_b) = f.competing_offers(m1);
+    f.client.accept_offer(&offer_b);
+    f.client.fund_advance(&m1);
+
+    // Real financing is never unwound through this path.
+    assert_eq!(
+        f.client.try_cancel_finance_request(&m1),
+        Err(Ok(Error::InvalidMilestoneStatus)),
+    );
+    assert_eq!(
+        f.client.get_finance_position(&m1).status,
+        FinancePositionStatus::Active
+    );
+    assert_eq!(f.balance(&f.supplier), PRINCIPAL);
+}
+
+#[test]
+fn offers_cannot_be_accepted_after_the_request_is_cancelled() {
+    let f = setup();
+    let (_, m1, _) = f.milestone_seeking_finance();
+    let (offer_a, offer_b) = f.competing_offers(m1);
+
+    f.client.cancel_finance_request(&m1);
+
+    for offer in [offer_a, offer_b] {
+        assert_eq!(
+            f.client.try_accept_offer(&offer),
+            Err(Ok(Error::InvalidMilestoneStatus)),
+        );
+    }
+    // Nor are they presented as selectable any more.
+    assert!(f.client.get_open_offers(&m1).is_empty());
+    assert!(f.client.get_milestone_offer_ids(&m1).is_empty());
+}
+
+#[test]
+fn the_supplier_can_finish_unfinanced_after_cancelling() {
+    let f = setup();
+    let (order_id, m1, _) = f.milestone_seeking_finance();
+    f.client.cancel_finance_request(&m1);
+
+    // Straight through the unfinanced path.
+    let hash = f.evidence(4);
+    f.client.submit_evidence(&m1, &hash);
+    f.client.attest_milestone(&m1, &hash);
+    f.client.settle_milestone(&m1, &f.supplier);
+
+    // The whole protected amount goes to the supplier: no funder took a cut.
+    assert_eq!(f.balance(&f.supplier), AMOUNT_M1);
+    assert_eq!(f.escrow_balance(), 0);
+    assert_eq!(f.client.get_milestone(&m1).status, MilestoneStatus::Settled);
+    assert_eq!(f.balance(&f.funder_a), FUNDER_INITIAL_BALANCE);
+    assert_eq!(f.balance(&f.funder_b), FUNDER_INITIAL_BALANCE);
+    let _ = order_id;
+}
+
+#[test]
+fn the_supplier_can_request_financing_again_after_cancelling() {
+    let f = setup();
+    let (_, m1, _) = f.milestone_seeking_finance();
+    f.competing_offers(m1);
+    f.client.cancel_finance_request(&m1);
+
+    // A completely fresh round on the same protected milestone.
+    let expires = f.now() + REQUEST_TTL;
+    f.client.request_finance(&m1, &PRINCIPAL, &expires);
+    assert_eq!(
+        f.client.get_finance_request(&m1).status,
+        FinanceRequestStatus::Open
+    );
+    assert!(f.client.get_open_offers(&m1).is_empty());
+
+    let offer = f.client.make_offer(
+        &m1,
+        &f.funder_a,
+        &PRINCIPAL,
+        &REPAYMENT_A,
+        &(f.now() + OFFER_TTL),
+    );
+    f.client.accept_offer(&offer);
+    f.client.fund_advance(&m1);
+
+    assert_eq!(f.balance(&f.supplier), PRINCIPAL);
+    assert_eq!(f.client.get_finance_position(&m1).funder, f.funder_a);
+    assert_eq!(f.escrow_balance(), AMOUNT_M1);
+}
+
+#[test]
+fn a_finance_request_cannot_be_cancelled_twice() {
+    let f = setup();
+    let (_, m1, _) = f.milestone_seeking_finance();
+    f.client.cancel_finance_request(&m1);
+
+    assert_eq!(
+        f.client.try_cancel_finance_request(&m1),
+        Err(Ok(Error::InvalidMilestoneStatus)),
+    );
+}
+
+#[test]
+fn cancelling_a_finance_request_emits_its_event() {
+    let f = setup();
+    let (_, m1, _) = f.milestone_seeking_finance();
+
+    f.client.cancel_finance_request(&m1);
+
+    assert_eq!(
+        f.last_event_name(),
+        Symbol::new(&f.env, "finance_request_cancelled")
+    );
+}

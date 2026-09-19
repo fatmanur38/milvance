@@ -1155,6 +1155,147 @@ impl MilvanceCore {
         Ok(())
     }
 
+    /// Buyer unwinds an incomplete funding attempt.
+    ///
+    /// Authorized by the **buyer**. Narrow by construction, and deliberately
+    /// **not** a general withdrawal: it applies only while the milestone is
+    /// still `Unfunded`, which is to say still short of its protected amount.
+    /// Once escrow reaches the full amount the milestone becomes `Funded` and
+    /// this path is closed forever — buyer protection is not revocable.
+    ///
+    /// Without it, a buyer who funded 50% and then stopped would have no exit:
+    /// the milestone cannot be evidenced, financed or disputed from `Unfunded`,
+    /// so the partial deposit would sit in escrow with nothing able to move it.
+    ///
+    /// Returns the milestone to zero funded, still `Unfunded`, so the buyer may
+    /// fund it again later. Adds no new milestone state.
+    pub fn cancel_partial_funding(env: &Env, milestone_id: u64) -> Result<i128, Error> {
+        let mut milestone = storage::read_milestone(env, milestone_id)?;
+        let order = storage::read_order(env, milestone.order_id)?;
+
+        order.buyer.require_auth();
+
+        if order.status != OrderStatus::Active {
+            return Err(Error::InvalidOrderStatus);
+        }
+        // A fully protected milestone is `Funded`, so this rejects it.
+        if milestone.status != MilestoneStatus::Unfunded {
+            return Err(Error::InvalidMilestoneStatus);
+        }
+        if milestone.funded_amount <= 0 {
+            return Err(Error::NoPartialFunding);
+        }
+
+        // The status guard above already implies each of the following, since
+        // every one of these requires `Funded` or later. They are kept as
+        // independent barriers so a future change to the status guard cannot
+        // quietly open a withdrawal path over live financing.
+        if milestone.evidence_hash.is_some() {
+            return Err(Error::InvalidMilestoneStatus);
+        }
+        if let Some(request) = storage::find_finance_request(env, milestone_id) {
+            if request.status == FinanceRequestStatus::Open
+                || request.status == FinanceRequestStatus::Accepted
+            {
+                return Err(Error::FinanceRequestActive);
+            }
+        }
+        if storage::find_accepted_offer(env, milestone_id).is_some() {
+            return Err(Error::OfferAlreadyAccepted);
+        }
+        if storage::find_finance_position(env, milestone_id).is_some() {
+            return Err(Error::AlreadyFinanced);
+        }
+        if let Some(dispute) = storage::find_milestone_dispute(env, milestone_id) {
+            if dispute.status == DisputeStatus::Open {
+                return Err(Error::DisputeAlreadyOpen);
+            }
+        }
+
+        let amount = milestone.funded_amount;
+        escrow::release(env, &order, &mut milestone, &order.buyer, amount)?;
+
+        // Status is unchanged: the milestone was never protected, and still is
+        // not. Only the partial escrow is undone.
+        storage::write_milestone(env, &milestone);
+        storage::extend_instance(env);
+
+        events::PartialFundingCancelled {
+            order_id: milestone.order_id,
+            milestone_id,
+            buyer: order.buyer,
+            amount,
+        }
+        .publish(env);
+
+        Ok(amount)
+    }
+
+    /// Supplier closes a finance request that never produced a funded advance.
+    ///
+    /// Authorized by the **supplier**. Covers both a voluntary withdrawal and a
+    /// request that simply lapsed without an acceptable offer: either way the
+    /// request is `Open`, and either way the supplier should be able to get on
+    /// with the work.
+    ///
+    /// Refused once an offer has been accepted or a position funded — those are
+    /// [`Self::release_expired_acceptance`]'s territory, and real financing is
+    /// never unwound here.
+    ///
+    /// The milestone returns to `Funded`: still fully protected, simply no
+    /// longer seeking financing. From there the supplier can submit evidence
+    /// and finish unfinanced, or open a fresh request later. Adds no new
+    /// milestone state and moves no value — buyer escrow is untouched.
+    ///
+    /// Returns `true` if the request had already expired.
+    pub fn cancel_finance_request(env: &Env, milestone_id: u64) -> Result<bool, Error> {
+        let mut milestone = storage::read_milestone(env, milestone_id)?;
+        let order = storage::read_order(env, milestone.order_id)?;
+
+        order.supplier.require_auth();
+
+        if order.status != OrderStatus::Active {
+            return Err(Error::InvalidOrderStatus);
+        }
+        if milestone.status != MilestoneStatus::FinanceRequested {
+            return Err(Error::InvalidMilestoneStatus);
+        }
+        // Real financing is never unwound through this path.
+        if storage::find_finance_position(env, milestone_id).is_some() {
+            return Err(Error::AlreadyFinanced);
+        }
+        if storage::find_accepted_offer(env, milestone_id).is_some() {
+            return Err(Error::OfferAlreadyAccepted);
+        }
+
+        let mut request = storage::read_finance_request(env, milestone_id)?;
+        if request.status != FinanceRequestStatus::Open {
+            return Err(Error::InvalidFinanceRequestStatus);
+        }
+
+        let was_expired = !financing::is_live(env, request.expires_at);
+
+        request.status = FinanceRequestStatus::Cancelled;
+        milestone.status = MilestoneStatus::Funded;
+
+        storage::write_finance_request(env, &request);
+        storage::write_milestone(env, &milestone);
+        // Outstanding offers belong to a round that is over. Closing the
+        // request already makes them unacceptable; clearing the index stops
+        // them being presented as selectable.
+        storage::write_milestone_offers(env, milestone_id, &Vec::new(env));
+        storage::extend_instance(env);
+
+        events::FinanceRequestCancelled {
+            milestone_id,
+            supplier: order.supplier,
+            was_expired,
+        }
+        .publish(env);
+
+        Ok(was_expired)
+    }
+
     // -----------------------------------------------------------------------
     // Read helpers
     // -----------------------------------------------------------------------
