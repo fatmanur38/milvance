@@ -36,9 +36,9 @@ export default function HomePage(): React.ReactElement {
         </div>
       </dl>
 
-      <p className="text-xs opacity-60">
-        Repository scaffold (PKG-00). Product flows are not implemented yet.
-      </p>
+      <a className="text-sm underline" href="/wallet">
+        Connect a Testnet wallet →
+      </a>
     </main>
   );
 }

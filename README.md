@@ -9,9 +9,9 @@
 
 ---
 
-> **Repository status:** scaffold only (PKG-00). The Soroban financial core, Anchor
-> integration, wallet layer, backend and product UI are not implemented yet. Sections
-> marked _TBD_ are completed in later packages — see [Roadmap](#roadmap-to-submission).
+> **Repository status:** The Phase 1 Soroban core is deployed on Stellar Testnet and
+> the minimal Freighter wallet surface is available at `/wallet`. Anchor integration,
+> backend and full product UI remain later packages — see [Roadmap](#roadmap-to-submission).
 
 ---
 
@@ -79,7 +79,7 @@ physical-world verification, and a finance position is not risk-free.
 ## Repository layout
 
 ```text
-apps/web                    Next.js product UI            (PKG-09…PKG-11)
+apps/web                    Next.js wallet proof + future product UI
 apps/api                    NestJS read layer + indexer   (PKG-08)
 contracts/milvance-core     Soroban financial core        (PKG-01…PKG-04)
 packages/shared             Framework-agnostic primitives
@@ -134,15 +134,15 @@ reach the browser.
 
 ## Roadmap to submission
 
-| Phase | Package(s)     | Scope                                            | Status                   |
-| ----- | -------------- | ------------------------------------------------ | ------------------------ |
-| 0     | PKG-00         | Repository, tooling, CI, guardrails              | ✅ done                  |
-| 1     | PKG-01…PKG-04  | Soroban financial core                           | ✅ done                  |
-| 2     | PKG-05, PKG-06 | Testnet deployment, Stellar Wallets Kit          | PKG-05 done; PKG-06 next |
-| 3     | PKG-07         | Anchor / local payments (TRY ↔ USDC)             | ⬜                       |
-| 4     | PKG-08         | API, PostgreSQL read models, Soroban indexer     | ⬜                       |
-| 5     | PKG-09…PKG-11  | Product UI, Trade Lab, public traction dashboard | ⬜                       |
-| 6     | PKG-12         | Hardening, documentation, demo, submission       | ⬜                       |
+| Phase | Package(s)     | Scope                                            | Status                          |
+| ----- | -------------- | ------------------------------------------------ | ------------------------------- |
+| 0     | PKG-00         | Repository, tooling, CI, guardrails              | ✅ done                         |
+| 1     | PKG-01…PKG-04  | Soroban financial core                           | ✅ done                         |
+| 2     | PKG-05, PKG-06 | Testnet deployment, Stellar Wallets Kit          | PKG-05 done; PKG-06 in progress |
+| 3     | PKG-07         | Anchor / local payments (TRY ↔ USDC)             | ⬜                              |
+| 4     | PKG-08         | API, PostgreSQL read models, Soroban indexer     | ⬜                              |
+| 5     | PKG-09…PKG-11  | Product UI, Trade Lab, public traction dashboard | ⬜                              |
+| 6     | PKG-12         | Hardening, documentation, demo, submission       | ⬜                              |
 
 ## Documentation
 
@@ -166,6 +166,14 @@ MilvanceCore is deployed on **Stellar Testnet** (`Test SDF Network ; September 2
 The [deployment artifact](deployments/testnet.json) includes the WASM hash and
 public network metadata. See the [Testnet deployment guide](scripts/deploy-testnet/README.md)
 for the repeatable deployment, bindings, and read-only smoke-test commands.
+
+## Wallet proof
+
+Run `pnpm --filter @milvance/web dev`, then open `http://localhost:3000/wallet` in a
+browser with Freighter. The page checks the actual wallet network and approved USDC
+trustline. A connected buyer can create an empty Testnet order using the generated
+MilvanceCore bindings; Freighter signs it, and the page reads the confirmed order
+back from the contract. See [wallet layer guide](docs/WALLET_LAYER.md).
 
 ## Built for
 

@@ -5,6 +5,9 @@
 /MILVANCE_SSOT*.md
 /docs/MILVANCE_SSOT.md
 /docs/MILVANCE_SSOT*.md
+# Next.js development generates local agent instruction files under apps/web.
+/apps/web/AGENTS.md
+/apps/web/CLAUDE.md
 
 # --- Secrets & environment ---
 .env
