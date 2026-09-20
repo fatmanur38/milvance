@@ -126,7 +126,22 @@ unverified form submission.
 are never written as Soroban milestone states. A deadline passing alone moves
 no money.
 
+Settlement and refund empty a milestone's escrow on chain, so the projection
+records `fundedAmount` as zero for `SETTLED` and `REFUNDED` milestones. What was
+protected is preserved on the settlement and refund rows. PKG-09 found this
+divergence on live Testnet data: the read model kept the pre-release amount, so
+reconciliation failed and the workspace claimed money was still held by the
+contract after it had been paid out.
+
 ## Live Testnet verification
+
+This section records the contract as it stood at the PKG-08 backfill. The
+contract has emitted further events since: the PKG-09 browser proof added an
+unfunded milestone 1 to order #1 (`milestone_created`, ledger **4,765,836**,
+transaction
+[`216c40a2…`](https://stellar.expert/explorer/testnet/tx/216c40a2b1494e58466366c926ba0020d83d91640306dc876139663fdb322509)).
+The event and order counts below are correct for that earlier point, not for
+the live contract today.
 
 PKG-08 backfilled the deployed contract
 `CCN6AZHLN2BQPCDZWXJGA3NRJEJ56V5JK3M4VZ5QFKQ3NSJBN6RVTKRX` from

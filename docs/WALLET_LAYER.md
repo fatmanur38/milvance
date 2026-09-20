@@ -23,6 +23,10 @@ This proves the PKG-06 browser-wallet authorization exit gate. Creating this emp
 order did not fund a milestone or transfer USDC. Later financial actions still
 require their own wallet authorization and validation.
 
+The facts above describe the contract at ledger 4,761,475. Order #1 has changed
+since: the PKG-09 browser proof added an unfunded 2,000 USDC milestone to it at
+ledger 4,765,836, and later orders have raised `order_count`.
+
 ## Live check
 
 1. Run `pnpm --filter @milvance/web dev` and open `http://localhost:3000/wallet` in

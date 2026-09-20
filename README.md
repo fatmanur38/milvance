@@ -159,6 +159,7 @@ transaction; users continue to authorize financial actions in their wallets.
 - [Threat model](docs/THREAT_MODEL.md) — _TBD_
 - [Demo runbook](docs/DEMO_RUNBOOK.md) — _TBD_
 - [Product narrative](docs/PRODUCT_NARRATIVE.md) — _TBD_
+- [Product workspace](docs/PRODUCT_WORKSPACE.md)
 - [Local payments (Anchor)](docs/ANCHOR_LOCAL_PAYMENTS.md)
 - [API read layer and indexer](docs/API_READ_LAYER.md)
 - [Architecture decision records](docs/adr/)
@@ -205,6 +206,27 @@ browser with Freighter signing every transaction:
 
 Milvance never holds a key, a seed, or a signature on the user's behalf. See the
 [local payments guide](docs/ANCHOR_LOCAL_PAYMENTS.md).
+
+## Multi-role proof
+
+The workspace at `http://localhost:3000/app` shows a trade to whoever is looking:
+buyer, supplier, funder, attestor or resolver, derived from the connected wallet
+and the addresses on the order.
+
+A complete trade was run live on Stellar Testnet from the browser, with a human
+approving all fourteen transactions in Freighter across five separate accounts.
+Order #2 carried two 10 USDC milestones:
+
+- **Financed and settled.** The buyer protected 10 USDC. A funder advanced 8 USDC
+  of their own money straight to the supplier — not from the buyer's escrow. After
+  the attestor verified the evidence, the escrow repaid the funder 9 USDC first
+  and paid the supplier the remaining 1 USDC.
+- **Unfinanced and refunded.** The buyer protected 10 USDC, opened a dispute, and
+  the resolver returned the full amount to the buyer.
+
+The order then completed itself, leaving the contract holding nothing. Every
+transaction hash is listed in the [product workspace guide](docs/PRODUCT_WORKSPACE.md),
+along with the two bugs the live run exposed and fixed.
 
 ## Built for
 

@@ -549,7 +549,13 @@ suite('event projection', () => {
         BigInt(settlement.funderRepayment.toFixed(0)) +
           BigInt(settlement.supplierPayout.toFixed(0)),
       ).toBe(BigInt(settlement.protectedAmount.toFixed(0)));
-      expect((await prisma.milestoneReadModel.findFirstOrThrow()).status).toBe('SETTLED');
+      const settled = await prisma.milestoneReadModel.findFirstOrThrow();
+      expect(settled.status).toBe('SETTLED');
+      // The escrow is empty: the contract released all of it. Saying otherwise
+      // tells the buyer their money is still held by the contract.
+      expect(settled.fundedAmount.toFixed(0)).toBe('0');
+      // What was protected survives on the settlement row, not the milestone.
+      expect(settlement.protectedAmount.toFixed(0)).toBe('100000000000');
       expect((await prisma.financePositionReadModel.findFirstOrThrow()).status).toBe('REPAID');
     });
 
@@ -567,7 +573,11 @@ suite('event projection', () => {
       const refund = await prisma.refundReadModel.findFirstOrThrow();
       // The supplier keeps the advance; the funder's claim is off-chain.
       expect(refund.funderAdvanceOutstanding.toFixed(0)).toBe('70000000000');
-      expect((await prisma.milestoneReadModel.findFirstOrThrow()).status).toBe('REFUNDED');
+      const refunded = await prisma.milestoneReadModel.findFirstOrThrow();
+      expect(refunded.status).toBe('REFUNDED');
+      // Everything the milestone held went back to the buyer.
+      expect(refunded.fundedAmount.toFixed(0)).toBe('0');
+      expect(refund.refundedAmount.toFixed(0)).toBe('100000000000');
       expect((await prisma.financePositionReadModel.findFirstOrThrow()).status).toBe('CLOSED');
     });
 

@@ -1,18 +1,76 @@
 @import 'tailwindcss';
 
+/*
+ * Milvance design tokens.
+ *
+ * A restrained B2B palette. Two semantic colours carry meaning and are never
+ * reused decoratively:
+ *
+ *   --protected  buyer money held on Stellar — protected, NOT supplier cash
+ *   --capital    funder working capital — usable money, from the funder
+ *
+ * If those two ever looked alike, the product would be lying.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #0a0a0a;
+  --background: #f7f8fa;
+  --surface: #ffffff;
+  --foreground: #111827;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --accent: #1f3a5f;
+  --accent-foreground: #ffffff;
+
+  --protected: #1d4ed8;
+  --protected-soft: #eff4ff;
+  --capital: #047857;
+  --capital-soft: #ecfdf5;
+  --attention: #b45309;
+  --attention-soft: #fffbeb;
+  --danger: #b91c1c;
+  --danger-soft: #fef2f2;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #0b0f17;
+    --surface: #111827;
+    --foreground: #e5e7eb;
+    --muted: #9ca3af;
+    --border: #1f2937;
+    --accent: #93c5fd;
+    --accent-foreground: #0b0f17;
+
+    --protected: #93b4ff;
+    --protected-soft: #111c33;
+    --capital: #6ee7b7;
+    --capital-soft: #0c2a22;
+    --attention: #fbbf24;
+    --attention-soft: #2a2110;
+    --danger: #fca5a5;
+    --danger-soft: #2a1414;
   }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-protected: var(--protected);
+  --color-protected-soft: var(--protected-soft);
+  --color-capital: var(--capital);
+  --color-capital-soft: var(--capital-soft);
+  --color-attention: var(--attention);
+  --color-attention-soft: var(--attention-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
+  font-feature-settings: 'tnum' 1;
 }

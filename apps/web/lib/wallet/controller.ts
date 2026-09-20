@@ -59,10 +59,27 @@ const detail = (error: unknown): string => {
   return 'The wallet or network request failed.';
 };
 
+/**
+ * Whether the wallet is in a state where the user can be asked to sign.
+ *
+ * True once an address is known on the right network, including after a
+ * previous transaction confirmed or failed. False while disconnected,
+ * connecting, or on the wrong network.
+ */
+export function canSign(state: WalletState): boolean {
+  return (
+    state.address !== undefined &&
+    state.phase !== 'disconnected' &&
+    state.phase !== 'connecting' &&
+    state.phase !== 'wrong-network'
+  );
+}
+
 export class WalletController {
   state: WalletState = { phase: 'disconnected' };
   private listeners = new Set<() => void>();
   private busy = false;
+  private syncing = false;
 
   constructor(
     private readonly wallet: WalletPort,
@@ -162,23 +179,74 @@ export class WalletController {
   }
 
   /**
-   * Signs an arbitrary transaction XDR with the connected wallet.
+   * Signs a transaction XDR with the connected wallet.
    *
-   * Used by the local-payment flows for two things the contract path does not
-   * cover: the Anchor's SEP-10 sign-in challenge, and the USDC payment that
-   * settles a withdrawal. Both are ordinary Stellar transactions the user must
-   * authorize themselves, and routing them through the controller keeps the
-   * network and account guards in `FreighterWallet.signTransaction` applying to
-   * every signature the app requests.
+   * Used for everything the user authorizes outside the create-order flow:
+   * MilvanceCore actions built by the generated bindings, the Anchor's SEP-10
+   * sign-in challenge, and the USDC payment that settles a withdrawal.
+   *
+   * The guard here is deliberately about identity, not about USDC: a missing
+   * trustline must not stop a supplier accepting an order or an attestor
+   * verifying a milestone, neither of which moves USDC. The authoritative
+   * checks — right network, same account — run again inside the wallet port at
+   * the moment of signing, so a stale phase can never produce a wrong signature.
    *
    * Returns the signed XDR. It never sees a secret key.
    */
   async signRaw(xdr: string): Promise<string> {
     const address = this.state.address;
-    if (this.state.phase !== 'connected' || address === undefined) {
-      throw new Error('Connect your wallet before signing.');
+    if (!canSign(this.state) || address === undefined) {
+      throw new Error(
+        this.state.phase === 'wrong-network'
+          ? 'Switch Freighter to Stellar Testnet before signing.'
+          : 'Connect your wallet before signing.',
+      );
     }
     return this.wallet.signTransaction(xdr, address);
+  }
+
+  /**
+   * Background check that the connected account and network still match.
+   *
+   * Freighter can switch accounts at any moment and cannot tell the page. One
+   * person acting as buyer, then supplier, then funder does it constantly, so
+   * an address read once at connect time goes stale silently — and every
+   * action built from it names the wrong party. Polling this keeps the
+   * workspace on the account the user is actually using, without asking them
+   * to reconnect.
+   *
+   * Unlike refresh(), a transient failure is ignored: this runs unattended, so
+   * a locked extension or a slow Horizon must not flap the UI into an error.
+   * The authoritative account and network checks still run inside the wallet
+   * port at the moment of signing.
+   */
+  async sync(): Promise<void> {
+    if (!this.state.address || this.busy || this.syncing) return;
+    this.syncing = true;
+    try {
+      const address = await this.wallet.currentAddress();
+      if (address !== this.state.address) {
+        this.session.set(address);
+        await this.inspect(address);
+        return;
+      }
+      const onTestnet =
+        (await this.wallet.networkPassphrase()) === testnetDeployment.networkPassphrase;
+      if (!onTestnet && this.state.phase !== 'wrong-network') {
+        this.update({
+          phase: 'wrong-network',
+          address,
+          message: 'Switch Freighter to Stellar Testnet.',
+        });
+      } else if (onTestnet && this.state.phase === 'wrong-network') {
+        await this.inspect(address);
+      }
+    } catch {
+      // Extension locked, popup open, or Horizon unreachable. Keep the last
+      // known state; the next tick tries again.
+    } finally {
+      this.syncing = false;
+    }
   }
 
   async refresh(): Promise<void> {

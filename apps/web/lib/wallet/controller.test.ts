@@ -182,3 +182,153 @@ describe('wallet authorization flow', () => {
     expect(contract.prepareCreateOrder).not.toHaveBeenCalled();
   });
 });
+
+describe('signing guard', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('refuses to sign while disconnected', async () => {
+    const { controller, wallet } = harness();
+    await expect(controller.signRaw('xdr')).rejects.toThrow(/Connect your wallet/);
+    expect(wallet.signTransaction).not.toHaveBeenCalled();
+  });
+
+  it('refuses to sign on the wrong network, and says so', async () => {
+    const { controller, wallet } = harness();
+    vi.mocked(wallet.networkPassphrase).mockResolvedValue(
+      'Public Global Stellar Network ; September 2015',
+    );
+    await controller.connect();
+    expect(controller.state.phase).toBe('wrong-network');
+    await expect(controller.signRaw('xdr')).rejects.toThrow(/Testnet/);
+    expect(wallet.signTransaction).not.toHaveBeenCalled();
+  });
+
+  it('still signs actions that move no USDC when the trustline is missing', async () => {
+    const { controller, wallet, trustline } = harness();
+    vi.mocked(trustline.check).mockResolvedValue('missing');
+    await controller.connect();
+    expect(controller.state.phase).toBe('trustline-required');
+    await expect(controller.signRaw('xdr')).resolves.toBe('signed');
+    expect(wallet.signTransaction).toHaveBeenCalledWith('xdr', buyer);
+  });
+
+  it('keeps signing available after an earlier transaction confirmed', async () => {
+    const { controller } = harness();
+    await controller.connect();
+    await controller.createOrder(input);
+    expect(controller.state.phase).toBe('confirmed');
+    await expect(controller.signRaw('next')).resolves.toBe('signed');
+  });
+});
+
+/**
+ * One person plays several parties in a trade: buyer, then supplier, then
+ * funder. They switch account inside Freighter, which cannot tell the page.
+ * If the workspace keeps the previous address, every action it builds names
+ * the wrong party and is refused at signing — so the account the user sees
+ * must follow the account Freighter is actually on.
+ */
+describe('Freighter account switching', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const supplier = 'GSUPPLIER';
+
+  it('follows an account switch without a reconnect', async () => {
+    const { controller, wallet, session } = harness();
+    await controller.connect();
+    expect(controller.state.address).toBe(buyer);
+
+    vi.mocked(wallet.currentAddress).mockResolvedValue(supplier);
+    await controller.sync();
+
+    expect(controller.state.address).toBe(supplier);
+    expect(controller.state.phase).toBe('connected');
+    expect(session.get()).toBe(supplier);
+    // Only the explicit connect above: the switch needed no reconnect.
+    expect(wallet.connect).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-checks the USDC trustline for the account switched to', async () => {
+    const { controller, wallet, trustline } = harness();
+    await controller.connect();
+
+    vi.mocked(wallet.currentAddress).mockResolvedValue(supplier);
+    vi.mocked(trustline.check).mockResolvedValue('missing');
+    await controller.sync();
+
+    expect(trustline.check).toHaveBeenCalledWith(supplier);
+    expect(controller.state.phase).toBe('trustline-required');
+    expect(controller.state.trustline).toBe('missing');
+  });
+
+  it('signs with the account switched to, never the previous one', async () => {
+    const { controller, wallet } = harness();
+    await controller.connect();
+    vi.mocked(wallet.currentAddress).mockResolvedValue(supplier);
+    await controller.sync();
+
+    await expect(controller.signRaw('xdr')).resolves.toBe('signed');
+    expect(wallet.signTransaction).toHaveBeenCalledWith('xdr', supplier);
+    expect(wallet.signTransaction).not.toHaveBeenCalledWith('xdr', buyer);
+  });
+
+  it('does not carry one account’s transaction over to the next', async () => {
+    const { controller, wallet } = harness();
+    await controller.connect();
+    await controller.createOrder(input);
+    expect(controller.state.transactionHash).toBe('abc123');
+
+    vi.mocked(wallet.currentAddress).mockResolvedValue(supplier);
+    await controller.sync();
+
+    expect(controller.state.address).toBe(supplier);
+    expect(controller.state.transactionHash).toBeUndefined();
+    expect(controller.state.order).toBeUndefined();
+  });
+
+  it('leaves the connected account alone when the wallet cannot be read', async () => {
+    const { controller, wallet } = harness();
+    await controller.connect();
+
+    vi.mocked(wallet.currentAddress).mockRejectedValue(new Error('extension locked'));
+    await controller.sync();
+
+    expect(controller.state.address).toBe(buyer);
+    expect(controller.state.phase).toBe('connected');
+    expect(controller.state.message).toBeUndefined();
+  });
+
+  it('reports a network switch, and recovers when Testnet comes back', async () => {
+    const { controller, wallet } = harness();
+    await controller.connect();
+
+    vi.mocked(wallet.networkPassphrase).mockResolvedValue(
+      'Public Global Stellar Network ; September 2015',
+    );
+    await controller.sync();
+    expect(controller.state.phase).toBe('wrong-network');
+
+    vi.mocked(wallet.networkPassphrase).mockResolvedValue(testnetDeployment.networkPassphrase);
+    await controller.sync();
+    expect(controller.state.phase).toBe('connected');
+    expect(controller.state.address).toBe(buyer);
+  });
+
+  it('does not ask Horizon again while the account is unchanged', async () => {
+    const { controller, trustline } = harness();
+    await controller.connect();
+    vi.mocked(trustline.check).mockClear();
+
+    await controller.sync();
+    await controller.sync();
+
+    expect(trustline.check).not.toHaveBeenCalled();
+  });
+
+  it('stays quiet while no wallet is connected', async () => {
+    const { controller, wallet } = harness();
+    await controller.sync();
+    expect(wallet.currentAddress).not.toHaveBeenCalled();
+    expect(controller.state.phase).toBe('disconnected');
+  });
+});

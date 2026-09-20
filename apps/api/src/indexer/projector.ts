@@ -595,9 +595,14 @@ export async function projectEvent(
         update: {},
       });
       if (isNewer(milestone.lastEventId, event.eventId)) {
+        // Settlement empties the escrow: the contract releases the funder's
+        // repayment and the supplier's payout, leaving `funded_amount` at zero.
+        // The read model must say the same, or the workspace keeps telling the
+        // buyer their money is still held by the contract. What was protected
+        // is preserved on the settlement row, not on the milestone.
         await db.milestoneReadModel.update({
           where: { id: milestone.id },
-          data: { status: 'SETTLED', ...stamp(event) },
+          data: { status: 'SETTLED', fundedAmount: '0', ...stamp(event) },
         });
       }
       if (funderRepayment > 0n) {
@@ -634,9 +639,12 @@ export async function projectEvent(
         update: {},
       });
       if (isNewer(milestone.lastEventId, event.eventId)) {
+        // A refund releases everything the milestone still held back to the
+        // buyer, so the escrow is empty here too. The amount returned is kept
+        // on the refund row.
         await db.milestoneReadModel.update({
           where: { id: milestone.id },
-          data: { status: 'REFUNDED', ...stamp(event) },
+          data: { status: 'REFUNDED', fundedAmount: '0', ...stamp(event) },
         });
       }
       // The refund did NOT claw back the funder's advance. The position closes

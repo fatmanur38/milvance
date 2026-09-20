@@ -43,6 +43,14 @@ function parseChainId(raw: string, label: string): bigint {
   return value;
 }
 
+/** A classic Stellar account address. Compared exactly, never case-folded. */
+function parseAccount(raw: string, label: string): string {
+  if (!/^G[A-Z2-7]{55}$/.test(raw)) {
+    throw new BadRequestException(`${label} must be a Stellar public key`);
+  }
+  return raw;
+}
+
 function parseLimit(raw: string | undefined): number {
   if (raw === undefined) {
     return 50;
@@ -69,24 +77,54 @@ export class ReadController {
     };
   }
 
+  /**
+   * Orders, optionally scoped to one wallet.
+   *
+   * `participant` matches the wallet against every role the contract assigns
+   * on an order — buyer, supplier, attestor and resolver — with an exact
+   * comparison. It answers "which orders involve this wallet"; it grants
+   * nothing. The contract's `require_auth` checks remain the only authority.
+   *
+   * Milestones are included so a workspace can derive what needs attention
+   * without one request per order.
+   */
   @Get('orders')
   async listOrders(
     @Query('buyer') buyer?: string,
     @Query('supplier') supplier?: string,
+    @Query('participant') participant?: string,
     @Query('status') status?: string,
     @Query('limit') limit?: string,
   ) {
+    const wallet = participant === undefined ? undefined : parseAccount(participant, 'participant');
     const rows = await this.prisma.orderReadModel.findMany({
       where: {
         ...this.scope,
         ...(buyer !== undefined ? { buyer } : {}),
         ...(supplier !== undefined ? { supplier } : {}),
+        ...(wallet !== undefined
+          ? {
+              OR: [
+                { buyer: wallet },
+                { supplier: wallet },
+                { attestor: wallet },
+                { resolver: wallet },
+              ],
+            }
+          : {}),
         ...(status !== undefined ? { status: status.toUpperCase() as never } : {}),
       },
+      include: { milestones: { orderBy: { index: 'asc' } } },
       orderBy: { orderId: 'asc' },
       take: parseLimit(limit),
     });
-    return { orders: rows.map(serialiseOrder), count: rows.length };
+    return {
+      orders: rows.map((row) => ({
+        ...serialiseOrder(row),
+        milestones: row.milestones.map((milestone) => serialiseMilestone(milestone)),
+      })),
+      count: rows.length,
+    };
   }
 
   @Get('orders/:orderId')
@@ -149,6 +187,16 @@ export class ReadController {
       throw new NotFoundException(`Milestone ${milestoneId} is not in the read model`);
     }
     const active = milestone.financePosition.find((position) => position.status === 'ACTIVE');
+    // Payout records as the contract emitted them. A workspace shows these
+    // figures verbatim instead of recomputing the waterfall in the browser.
+    const [settlement, refund] = await Promise.all([
+      this.prisma.settlementReadModel.findUnique({
+        where: { settlement_identity: { ...this.scope, milestoneId: id } },
+      }),
+      this.prisma.refundReadModel.findUnique({
+        where: { refund_identity: { ...this.scope, milestoneId: id } },
+      }),
+    ]);
     return {
       milestoneId,
       buyerProtectedEscrow: milestone.fundedAmount.toFixed(0),
@@ -159,6 +207,25 @@ export class ReadController {
           : serialiseFinanceRequest(milestone.financeRequest),
       offers: milestone.fundingOffers.map(serialiseOffer),
       positions: milestone.financePosition.map(serialisePosition),
+      settlement:
+        settlement === null
+          ? null
+          : {
+              protectedAmount: settlement.protectedAmount.toFixed(0),
+              funderRepayment: settlement.funderRepayment.toFixed(0),
+              supplierPayout: settlement.supplierPayout.toFixed(0),
+              settledAt: settlement.settledAt.toISOString(),
+              settledTxHash: settlement.settledTxHash,
+            },
+      refund:
+        refund === null
+          ? null
+          : {
+              refundedAmount: refund.refundedAmount.toFixed(0),
+              funderAdvanceOutstanding: refund.funderAdvanceOutstanding.toFixed(0),
+              refundedAt: refund.refundedAt.toISOString(),
+              refundedTxHash: refund.refundedTxHash,
+            },
     };
   }
 
@@ -212,7 +279,7 @@ export class ReadController {
   async fundingOpportunities(@Query('limit') limit?: string) {
     const rows = await this.prisma.financeRequestReadModel.findMany({
       where: { ...this.scope, status: 'OPEN' },
-      include: { milestone: true },
+      include: { milestone: { include: { order: true } } },
       orderBy: { createdAt: 'desc' },
       take: parseLimit(limit),
     });
@@ -220,6 +287,50 @@ export class ReadController {
       opportunities: rows.map((row) => ({
         ...serialiseFinanceRequest(row),
         milestone: serialiseMilestone(row.milestone),
+        // The order's parties are public chain data. A workspace needs them to
+        // show that a funder must be independent of all four — the contract
+        // rejects an offer from any of them.
+        order: serialiseOrder(row.milestone.order),
+      })),
+    };
+  }
+
+  /**
+   * Offers made by one funder, across every milestone.
+   *
+   * Without this a funder whose offer was ACCEPTED could not find it: an
+   * accepted request leaves the open-opportunities list, yet the funder still
+   * has to fund the advance from their own wallet.
+   */
+  @Get('funding/offers')
+  async fundingOffers(
+    @Query('funder') funder?: string,
+    @Query('status') status?: string,
+    @Query('limit') limit?: string,
+  ) {
+    if (funder === undefined) {
+      throw new BadRequestException('funder is required');
+    }
+    const wallet = parseAccount(funder, 'funder');
+    const rows = await this.prisma.fundingOfferReadModel.findMany({
+      where: {
+        ...this.scope,
+        funder: wallet,
+        ...(status !== undefined ? { status: status.toUpperCase() as never } : {}),
+      },
+      include: { milestone: { include: { order: true, financeRequest: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: parseLimit(limit),
+    });
+    return {
+      offers: rows.map((row) => ({
+        ...serialiseOffer(row),
+        milestone: serialiseMilestone(row.milestone),
+        order: serialiseOrder(row.milestone.order),
+        request:
+          row.milestone.financeRequest === null
+            ? null
+            : serialiseFinanceRequest(row.milestone.financeRequest),
       })),
     };
   }

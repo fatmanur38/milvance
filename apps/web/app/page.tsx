@@ -1,9 +1,5 @@
 /**
- * PKG-00 placeholder landing page.
- *
- * The real product surface (buyer / supplier / funder / attestor flows under
- * `/app/*`) is built in PKG-09. This page exists so the web skeleton builds and
- * renders, and so the repository states the product thesis from day one.
+ * Landing page: the product thesis, and the way into the workspace at /app.
  */
 export default function HomePage(): React.ReactElement {
   return (
@@ -34,7 +30,7 @@ export default function HomePage(): React.ReactElement {
           <dt className="font-medium">Anchor</dt>
           <dd className="opacity-80">
             The local-money edge: TRY in, TRY out, Stellar in between.{' '}
-            <a className="underline" href="/anchor">
+            <a className="underline" href="/app/anchor">
               Open local money
             </a>
             .
@@ -42,8 +38,11 @@ export default function HomePage(): React.ReactElement {
         </div>
       </dl>
 
-      <a className="text-sm underline" href="/wallet">
-        Connect a Testnet wallet →
+      <a
+        className="w-fit rounded-lg bg-black px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-black"
+        href="/app"
+      >
+        Open the workspace →
       </a>
     </main>
   );

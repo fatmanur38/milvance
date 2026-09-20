@@ -12,6 +12,8 @@ interface WalletContextValue {
 }
 
 const WalletContext = createContext<WalletContextValue | null>(null);
+/** How often to ask Freighter which account is active. Cheap: extension-local. */
+const ACCOUNT_POLL_MS = 3000;
 const serverState: WalletState = { phase: 'disconnected' };
 const serverSnapshot = () => serverState;
 
@@ -28,9 +30,21 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
   const state = useSyncExternalStore(controller.subscribe, controller.snapshot, serverSnapshot);
   useEffect(() => {
     void controller.restore();
-    const onFocus = () => void controller.refresh();
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
+    // Freighter cannot notify the page when the user switches account or
+    // network, so we ask it — while the tab is visible, and again whenever it
+    // comes back. Without this, switching roles in Freighter leaves the
+    // workspace showing the previous party until a manual reconnect.
+    const sync = (): void => {
+      if (document.visibilityState === 'visible') void controller.sync();
+    };
+    window.addEventListener('focus', sync);
+    document.addEventListener('visibilitychange', sync);
+    const timer = window.setInterval(sync, ACCOUNT_POLL_MS);
+    return () => {
+      window.removeEventListener('focus', sync);
+      document.removeEventListener('visibilitychange', sync);
+      window.clearInterval(timer);
+    };
   }, [controller]);
   return <WalletContext.Provider value={{ controller, state }}>{children}</WalletContext.Provider>;
 }
