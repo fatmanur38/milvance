@@ -3,7 +3,12 @@ import { render } from '@testing-library/react';
 import type { ReactElement } from 'react';
 
 import { queryKeys } from '@/lib/api/queries';
-import type { MilestoneEvidence, MilestoneFinance, OrderWithMilestones } from '@/lib/api/schemas';
+import type {
+  MilestoneEvidence,
+  MilestoneFinance,
+  OrderWithMilestones,
+  PublicMetrics,
+} from '@/lib/api/schemas';
 
 /**
  * Render with a query cache pre-seeded in the API's own shapes. Seeded queries
@@ -16,6 +21,7 @@ export function renderWithData(
     finance?: Record<string, MilestoneFinance>;
     evidence?: Record<string, MilestoneEvidence>;
     orders?: { participant: string; orders: OrderWithMilestones[] };
+    metrics?: PublicMetrics;
   } = {},
 ) {
   const client = new QueryClient({
@@ -34,5 +40,6 @@ export function renderWithData(
       count: seed.orders.orders.length,
     });
   }
+  if (seed.metrics) client.setQueryData(queryKeys.publicMetrics, seed.metrics);
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
 }

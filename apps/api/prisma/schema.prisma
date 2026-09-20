@@ -597,17 +597,45 @@ model AnchorTransaction {
   /// Anchor's own payout reference, recorded only when public-safe.
   payoutReference String?
 
+  /// Result of checking `stellarTxHash` against Stellar itself (PKG-11).
+  ///
+  /// A row here is a CLIENT REPORT. The fiat leg can never be proven by a
+  /// blockchain, but the Stellar leg can: this column records whether the
+  /// reported transaction really is a payment of the approved USDC asset, in
+  /// the reported direction, for the reported amount, involving the reported
+  /// wallet. Only CONFIRMED rows may support a completed-cycle metric.
+  stellarLegStatus StellarLegStatus @default(UNCHECKED)
+  stellarLegCheckedAt DateTime?
+  /// Why the check reached its verdict. Public-safe, never a credential.
+  stellarLegDetail String?
+  /// Ledger close time of the confirmed payment, from Stellar.
+  stellarLegAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([network, anchorDomain, anchorTransactionId], name: "anchor_transfer_identity")
   @@index([walletAddress])
   @@index([stellarTxHash])
+  @@index([stellarLegStatus])
 }
 
 enum AnchorDirection {
   TRY_TO_USDC
   USDC_TO_TRY
+}
+
+/// Verdict of an independent Stellar check on a reported local-payment leg.
+enum StellarLegStatus {
+  /// Not looked at yet. Never counts.
+  UNCHECKED
+  /// Stellar agrees: right asset, right direction, right wallet, right amount.
+  CONFIRMED
+  /// Stellar disagrees with the report. Never counts, and worth investigating.
+  MISMATCHED
+  /// Nothing to check against — no hash reported, or Stellar has no such
+  /// transaction. Never counts.
+  UNVERIFIABLE
 }
 
 /// Consent-based onboarding metadata. This is not evidence of a contract action;

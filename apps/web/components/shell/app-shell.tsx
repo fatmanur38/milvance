@@ -16,6 +16,7 @@ const NAV = [
   { href: '/app/trade-lab', label: 'Trade Lab' },
   { href: '/app/anchor', label: 'Local payments' },
   { href: '/app/activity', label: 'Activity' },
+  { href: '/app/metrics', label: 'Traction' },
 ] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {

@@ -163,6 +163,7 @@ transaction; users continue to authorize financial actions in their wallets.
 - [Trade Lab](docs/TRADE_LAB.md)
 - [Local payments (Anchor)](docs/ANCHOR_LOCAL_PAYMENTS.md)
 - [API read layer and indexer](docs/API_READ_LAYER.md)
+- [Public metrics](docs/METRICS.md)
 - [Architecture decision records](docs/adr/)
 
 ## Live deployment

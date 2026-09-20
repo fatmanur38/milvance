@@ -16,6 +16,7 @@ import {
   orderWithMilestonesSchema,
   participantSchema,
   positionsSchema,
+  publicMetricsSchema,
   readinessSchema,
 } from './schemas';
 
@@ -40,6 +41,7 @@ export const queryKeys = {
   funderOffers: (funder: string) => ['chain', 'funding', 'offers', funder] as const,
   positions: (funder: string) => ['chain', 'funding', 'positions', funder] as const,
   activity: ['chain', 'activity'] as const,
+  publicMetrics: ['chain', 'metrics', 'public'] as const,
   readiness: ['service', 'readiness'] as const,
   participant: (address: string) => ['service', 'participant', address] as const,
   indexerStatus: ['service', 'indexer'] as const,
@@ -63,6 +65,7 @@ export const api = {
   positions: (funder: string) =>
     apiRequest(`/funding/positions?funder=${enc(funder)}&limit=200`, positionsSchema),
   activity: () => apiRequest('/activity?limit=100', activitySchema),
+  publicMetrics: () => apiRequest('/metrics/public', publicMetricsSchema),
   readiness: () => apiRequest('/health/ready', readinessSchema),
   indexerStatus: () => apiRequest('/indexer/status', indexerStatusSchema),
   /** This wallet's own Trade Lab consent state. Consent metadata, never usage proof. */
@@ -156,6 +159,17 @@ export function usePositions(funder: string | undefined) {
 
 export function useActivity() {
   return useQuery({ queryKey: queryKeys.activity, queryFn: api.activity });
+}
+
+/**
+ * Public traction metrics.
+ *
+ * Under `queryKeys.chain` so a confirmed transaction invalidates it along with
+ * everything else chain-derived: a new trade should move these numbers without
+ * a reload, because they are the same chain state seen from further away.
+ */
+export function usePublicMetrics() {
+  return useQuery({ queryKey: queryKeys.publicMetrics, queryFn: api.publicMetrics });
 }
 
 /** Polled so the shell notices a stalled indexer without a page reload. */

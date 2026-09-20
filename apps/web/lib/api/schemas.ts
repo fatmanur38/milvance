@@ -258,6 +258,115 @@ export const participantSchema = z.object({
   note: z.string().optional(),
 });
 
+/**
+ * Public traction metrics.
+ *
+ * Money arrives as exact integer base units in a string, and local currency as
+ * a fixed-point decimal string. Neither is ever a number here: parsing an
+ * amount into a JavaScript float is how a figure quietly stops being exact.
+ *
+ * The API ships a definition alongside every value, and this schema requires
+ * them, so a metric cannot reach the page without saying what it means.
+ */
+const baseUnits = z.string().regex(/^\d+$/, 'base units must be a whole number');
+const fixedDecimal = z.string().regex(/^-?\d+\.\d+$/, 'expected a fixed-point decimal');
+
+export const metricDefinitionSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  definition: z.string(),
+  source: z.string(),
+  excludes: z.string(),
+  unit: z.enum(['count', 'usdc-base-units', 'try-decimal', 'seconds']),
+  provenance: z.enum([
+    'on-chain',
+    'anchor-reported',
+    'anchor-reported-chain-confirmed',
+    'self-declared',
+  ]),
+  population: z.enum(['all-participants', 'external-only']),
+});
+
+export const publicMetricsSchema = z.object({
+  scope: z.object({
+    network: z.string(),
+    contractId: z.string(),
+    testnetOnly: z.boolean(),
+    usdcDecimals: z.number(),
+    note: z.string(),
+  }),
+  provenance: z.object({
+    chainMetrics: z.string(),
+    localPaymentMetrics: z.string(),
+    adoptionMetrics: z.string(),
+    indexedThroughLedger: z.string().nullable(),
+    indexedEvents: z.number(),
+  }),
+  protocolActivity: z.object({
+    ordersCreated: z.number(),
+    ordersAccepted: z.number(),
+    ordersCompleted: z.number(),
+    milestonesCreated: z.number(),
+    milestonesProtected: z.number(),
+    protectedVolume: baseUnits,
+    financeRequests: z.number(),
+    fundingOffers: z.number(),
+    advancesFunded: z.number(),
+    advanceVolume: baseUnits,
+    milestonesSettled: z.number(),
+    funderRepaymentVolume: baseUnits,
+    supplierResidualVolume: baseUnits,
+    disputesOpened: z.number(),
+    milestonesRefunded: z.number(),
+    refundVolume: baseUnits,
+    distinctWallets: z.number(),
+  }),
+  localPayments: z.object({
+    onRampsReported: z.number(),
+    offRampsReported: z.number(),
+    legsChainConfirmed: z.number(),
+    legsMismatched: z.number(),
+    legsUnchecked: z.number(),
+    tryOnboarded: fixedDecimal,
+    tryPaidToSuppliers: fixedDecimal,
+  }),
+  northStar: z.object({
+    completedLocalPaymentFinanceCycles: z.number(),
+    candidateCycles: z.number(),
+    supplierOffRampCycles: z.number(),
+    buyerOnRampCycles: z.number(),
+    cycles: z.array(
+      z.object({
+        milestoneId: z.string(),
+        orderId: z.string().nullable(),
+        counted: z.boolean(),
+        link: z.enum(['supplier-offramp', 'buyer-onramp']).nullable(),
+        localPaymentTxHash: z.string().nullable(),
+        missing: z.array(z.string()),
+      }),
+    ),
+  }),
+  adoption: z.object({
+    externalWallets: z.number(),
+    teamWallets: z.number(),
+    unclassifiedWallets: z.number(),
+    distinctWallets: z.number(),
+  }),
+  timings: z.object({
+    medianOrderCompletionSeconds: z.number().nullable(),
+    medianTimeToLocalCashSeconds: z.number().nullable(),
+  }),
+  definitions: z.object({
+    protocolActivity: z.array(metricDefinitionSchema),
+    localPayments: z.array(metricDefinitionSchema),
+    northStar: metricDefinitionSchema,
+    adoption: z.array(metricDefinitionSchema),
+    timings: z.array(metricDefinitionSchema),
+    notDerivable: z.array(z.object({ key: z.string(), reason: z.string() })),
+    count: z.number(),
+  }),
+});
+
 export type Order = z.infer<typeof orderSchema>;
 export type Milestone = z.infer<typeof milestoneSchema>;
 export type OrderWithMilestones = z.infer<typeof orderWithMilestonesSchema>;
@@ -273,6 +382,8 @@ export type Readiness = z.infer<typeof readinessSchema>;
 export type IndexerStatus = z.infer<typeof indexerStatusSchema>;
 export type ActivityItem = z.infer<typeof activitySchema>['activity'][number];
 export type Participant = z.infer<typeof participantSchema>;
+export type PublicMetrics = z.infer<typeof publicMetricsSchema>;
+export type MetricDefinition = z.infer<typeof metricDefinitionSchema>;
 export type MilestoneStatus = (typeof MILESTONE_STATUSES)[number];
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 export type DerivedStatus = (typeof DERIVED_STATUSES)[number];

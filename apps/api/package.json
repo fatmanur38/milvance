@@ -13,7 +13,8 @@
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
-    "indexer": "node dist/indexer/indexer.main.js"
+    "indexer": "node dist/indexer/indexer.main.js",
+    "cycles": "node dist/metrics/cycles.main.js"
   },
   "dependencies": {
     "@milvance/contract-bindings": "workspace:*",
