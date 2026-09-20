@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, screen, within } from '@testing-library/react';
+import { fireEvent, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import type { ActivityItem } from '@/lib/api/schemas';
@@ -62,22 +62,20 @@ describe('the tour a judge sees', () => {
     expect(screen.getByTestId('tour-step')).toBeTruthy();
   });
 
-  it('leads with the animation, not with paragraphs', () => {
+  it('opens on the first real money movement, with one step of explanation', () => {
     show();
-    // Four parties on the stage, and one step's words — not twelve.
     for (const party of ['buyer', 'escrow', 'supplier', 'funder']) {
       expect(screen.getByTestId(`flow-node-${party}`)).toBeTruthy();
     }
+    expect(screen.getByTestId('flow-coin').getAttribute('data-amount')).toBe('100000000');
     expect(screen.getAllByTestId('tour-step')).toHaveLength(1);
   });
 
   it('lets a reader scrub the timeline instead of scrolling', () => {
     show();
-    const timeline = screen.getByRole('list', { name: /Trade timeline/i });
-    const marks = within(timeline).getAllByRole('button');
-    expect(marks).toHaveLength(5);
-
-    fireEvent.click(marks[2]!);
+    fireEvent.change(screen.getByRole('slider', { name: 'Trade timeline' }), {
+      target: { value: '2' },
+    });
     // Step 3 is the advance: the funder's own money, going straight across.
     const coin = screen.getByTestId('flow-coin');
     expect(coin.getAttribute('data-amount')).toBe('80000000');
@@ -86,9 +84,9 @@ describe('the tour a judge sees', () => {
 
   it('shows the advance leaving the funder, not the escrow', () => {
     show();
-    fireEvent.click(
-      within(screen.getByRole('list', { name: /Trade timeline/i })).getAllByRole('button')[2]!,
-    );
+    fireEvent.change(screen.getByRole('slider', { name: 'Trade timeline' }), {
+      target: { value: '2' },
+    });
     const escrow = screen.getByTestId('flow-node-escrow');
     // Escrow still holds the full protected amount while the advance moves.
     expect(escrow.textContent).toContain('10.00');
@@ -96,14 +94,27 @@ describe('the tour a judge sees', () => {
 
   it('moves two amounts at once when the contract settles', () => {
     show();
-    fireEvent.click(
-      within(screen.getByRole('list', { name: /Trade timeline/i })).getAllByRole('button')[4]!,
-    );
+    fireEvent.change(screen.getByRole('slider', { name: 'Trade timeline' }), {
+      target: { value: '4' },
+    });
     const coins = screen
       .getAllByTestId('flow-coin')
       .map((coin) => coin.getAttribute('data-amount'));
     // One transaction, two destinations: 9 to the funder, 1 to the supplier.
     expect(coins).toEqual(['90000000', '10000000']);
+  });
+
+  it('explains a selected role without changing the transaction', () => {
+    show();
+    fireEvent.click(screen.getByTestId('flow-node-escrow'));
+    expect(screen.getByText(/never sends the early working-capital advance/i)).toBeTruthy();
+    expect(screen.getByTestId('flow-coin').getAttribute('data-amount')).toBe('100000000');
+  });
+
+  it('lets a keyboard user select a role in the map', () => {
+    show();
+    fireEvent.keyDown(screen.getByTestId('flow-node-funder'), { key: 'Enter' });
+    expect(screen.getByText(/funder sends its own capital to the supplier/i)).toBeTruthy();
   });
 
   it('says up front that it is real history, not a simulation', () => {
@@ -119,9 +130,9 @@ describe('the tour a judge sees', () => {
     expect(links[0]?.getAttribute('href')).toMatch(/\/tx\/[0-9a-f]{64}$/);
   });
 
-  it('keeps every transaction reachable, one disclosure away', () => {
+  it('keeps every event reachable, one disclosure away', () => {
     show();
-    const list = screen.getByText(/All 5 transactions/i);
+    const list = screen.getByText(/All 5 on-chain steps/i);
     expect(list).toBeTruthy();
   });
 

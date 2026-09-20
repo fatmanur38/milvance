@@ -23,7 +23,7 @@ export function GuidedTour() {
   // No participant filter: the tour is public history, not anyone's workspace.
   const orders = useAllOrders();
   const activity = useActivity();
-  const [index, setIndex] = useState(0);
+  const [index, setIndex] = useState<number | null>(null);
 
   if (orders.isPending || activity.isPending) {
     return <Loading label="Reading the trade from Stellar…" />;
@@ -68,20 +68,23 @@ export function GuidedTour() {
     );
   }
 
-  const step = steps[Math.min(index, steps.length - 1)];
+  // Put the first actual money movement on screen immediately. Earlier setup
+  // events remain available by rewinding the timeline.
+  const initialIndex = steps.findIndex((candidate) => candidate.amountMeans === 'protected');
+  const activeIndex =
+    index === null ? Math.max(0, initialIndex) : Math.min(index, steps.length - 1);
+  const step = steps[activeIndex];
 
   return (
     <div className="flex flex-col gap-6">
-      {/* The animation first. The distinction it shows is the product. */}
-      <TradeFlow steps={steps} index={Math.min(index, steps.length - 1)} onIndexChange={setIndex} />
-
-      {step !== undefined && (
-        <StepDetail step={step} number={Math.min(index, steps.length - 1) + 1} />
-      )}
+      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.85fr)]">
+        <TradeFlow steps={steps} index={activeIndex} onIndexChange={setIndex} />
+        {step !== undefined && <StepDetail step={step} number={activeIndex + 1} />}
+      </div>
 
       <details className="rounded-xl border border-border p-4">
         <summary className="cursor-pointer text-sm font-medium">
-          All {steps.length} transactions of trade #{order.orderId}
+          All {steps.length} on-chain steps of trade #{order.orderId}
         </summary>
         <ol className="mt-3 flex flex-col gap-1">
           {steps.map((candidate, position) => (
@@ -89,9 +92,9 @@ export function GuidedTour() {
               <button
                 type="button"
                 onClick={() => setIndex(position)}
-                aria-current={position === index}
+                aria-current={position === activeIndex}
                 className={`flex w-full flex-wrap items-baseline gap-2 rounded-lg px-2 py-1.5 text-left text-sm ${
-                  position === index ? 'bg-foreground/[0.06]' : 'hover:bg-foreground/[0.03]'
+                  position === activeIndex ? 'bg-foreground/[0.06]' : 'hover:bg-foreground/[0.03]'
                 }`}
               >
                 <span className="w-5 shrink-0 tabular-nums text-xs text-muted">{position + 1}</span>
@@ -157,28 +160,39 @@ const THEME_LABELS: Record<TourStep['theme'], string> = {
  */
 function StepDetail({ step, number }: { step: TourStep; number: number }) {
   return (
-    <Card className="flex flex-col gap-3" data-testid="tour-step">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border text-xs tabular-nums">
-          {number}
-        </span>
-        <h3 className="text-base font-semibold">{step.title}</h3>
+    <Card className="flex flex-col gap-5 xl:min-h-[480px]" data-testid="tour-step">
+      <div className="flex items-center justify-between gap-2">
         <Badge tone="neutral">{THEME_LABELS[step.theme]}</Badge>
-        <span className="text-xs text-muted">{step.actor} signed this</span>
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted">
+          Step {number}
+        </span>
       </div>
 
-      <p className="text-sm">{step.detail}</p>
+      <div>
+        <h3 className="text-2xl font-semibold tracking-tight">{step.title}</h3>
+        <p className="mt-1 text-xs text-muted">
+          {step.actor === 'Contract' ? 'Executed by the contract' : `${step.actor} signed this`}
+        </p>
+      </div>
+
+      <p className="text-sm leading-6 text-muted">{step.detail}</p>
 
       {step.lesson !== undefined && (
-        <p className="rounded-lg border border-border bg-foreground/[0.03] p-3 text-sm">
+        <p className="rounded-r-lg border-l-4 border-protected bg-protected-soft p-3 text-sm leading-6">
           {step.lesson}
         </p>
       )}
 
-      <p className="text-xs text-muted">
-        Ledger {step.ledger} · {new Date(step.at).toISOString().replace('T', ' ').slice(0, 16)} UTC
-        · <ExplorerLink hash={step.txHash}>check it on Stellar</ExplorerLink>
-      </p>
+      <div className="mt-auto border-t border-border pt-4">
+        <p className="text-[11px] uppercase tracking-wide text-muted">Stellar transaction</p>
+        <p className="mt-1 text-xs text-muted">
+          Ledger {step.ledger} · {new Date(step.at).toISOString().replace('T', ' ').slice(0, 16)}{' '}
+          UTC
+        </p>
+        <p className="mt-2 text-sm font-semibold text-protected">
+          <ExplorerLink hash={step.txHash}>View this step on Stellar ↗</ExplorerLink>
+        </p>
+      </div>
     </Card>
   );
 }

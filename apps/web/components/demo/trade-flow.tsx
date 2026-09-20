@@ -21,10 +21,19 @@ import { formatUsdcUnits } from '@/lib/domain/amounts';
  */
 
 const NODES: Record<Party, { x: number; y: number; label: string; sub: string }> = {
-  buyer: { x: 96, y: 96, label: 'Buyer', sub: 'protects the payment' },
-  escrow: { x: 400, y: 96, label: 'MilvanceCore', sub: 'holds it on Stellar' },
-  supplier: { x: 704, y: 96, label: 'Supplier', sub: 'does the work' },
-  funder: { x: 96, y: 300, label: 'Funder', sub: 'own capital' },
+  buyer: { x: 105, y: 128, label: 'Buyer', sub: 'source of protected money' },
+  escrow: { x: 400, y: 128, label: 'MilvanceCore', sub: 'buyer money locked here' },
+  supplier: { x: 695, y: 128, label: 'Supplier', sub: 'receives working capital' },
+  funder: { x: 105, y: 305, label: 'Funder', sub: 'separate capital at risk' },
+};
+
+const ROLE_EXPLANATION: Record<Party, string> = {
+  buyer: 'The buyer commits the milestone payment. It stays protected until an authorized outcome.',
+  escrow: 'The contract holds buyer money. It never sends the early working-capital advance.',
+  supplier:
+    'This total is USDC actually received across the trade, including an advance and any settlement remainder.',
+  funder:
+    'The funder sends its own capital to the supplier and waits for repayment from verified escrow.',
 };
 
 /**
@@ -48,8 +57,8 @@ function pathFor(from: Party, to: Party): string {
  * every milestone card, and the advance is the same green.
  */
 const POOL_COLOUR: Record<Pool, string> = {
-  protected: 'var(--protected)',
-  advance: 'var(--capital)',
+  protected: '#80aaff',
+  advance: '#5ee5b3',
 };
 
 export function TradeFlow({
@@ -64,6 +73,7 @@ export function TradeFlow({
   const frames = useMemo(() => buildFlow(steps), [steps]);
   const scale = useMemo(() => flowScale(frames), [frames]);
   const [playing, setPlaying] = useState(true);
+  const [focusedParty, setFocusedParty] = useState<Party | null>(null);
   const reduced = usePrefersReducedMotion();
   const frame = frames[index];
 
@@ -75,19 +85,38 @@ export function TradeFlow({
       return;
     }
     const moving = (frame?.transfers.length ?? 0) > 0;
-    const timer = setTimeout(() => onIndexChange(index + 1), moving ? 2600 : 1400);
+    const timer = setTimeout(() => onIndexChange(index + 1), moving ? 3900 : 2500);
     return () => clearTimeout(timer);
   }, [playing, reduced, index, frames.length, frame, onIndexChange]);
 
   if (frame === undefined) return null;
 
+  const goTo = (next: number) => {
+    setPlaying(false);
+    onIndexChange(Math.max(0, Math.min(frames.length - 1, next)));
+  };
+
   return (
-    <div className="flex flex-col gap-3">
-      <div className="overflow-hidden rounded-xl border border-border bg-foreground/[0.02]">
+    <section aria-label="Interactive Testnet trade replay" className="flex flex-col gap-4">
+      <div
+        className="overflow-hidden rounded-3xl border border-slate-700 shadow-2xl"
+        style={{
+          background: 'radial-gradient(circle at 48% 38%, #243858 0%, #111d32 48%, #0b1323 100%)',
+          color: '#e2e8f0',
+        }}
+      >
+        <div className="flex items-center justify-between gap-3 px-5 pt-4 text-xs">
+          <span className="font-semibold uppercase tracking-[0.18em] text-sky-200">
+            Real Testnet event replay
+          </span>
+          <span className="rounded-full border border-slate-600 px-3 py-1 tabular-nums text-slate-300">
+            {index + 1} / {frames.length}
+          </span>
+        </div>
         <svg
           viewBox="0 0 800 400"
-          className="h-auto w-full"
-          role="img"
+          className="hidden h-auto w-full md:block"
+          role="group"
           aria-label={describe(frame, steps[index])}
         >
           <defs>
@@ -99,16 +128,8 @@ export function TradeFlow({
               refY="4"
               orient="auto"
             >
-              <path d="M0 0 L8 4 L0 8 z" fill="currentColor" opacity="0.35" />
+              <path d="M0 0 L8 4 L0 8 z" fill="#74849a" opacity="0.8" />
             </marker>
-            {/*
-              Keeps a node's meter inside its circle. `userSpaceOnUse` means the
-              circle is placed in whatever coordinate system references it, which
-              for a rect inside a translated group is that group's own origin.
-            */}
-            <clipPath id="flow-node-clip" clipPathUnits="userSpaceOnUse">
-              <circle cx={0} cy={0} r={34} />
-            </clipPath>
           </defs>
 
           {/* Routes, always visible so the two paths read as structural. */}
@@ -117,25 +138,49 @@ export function TradeFlow({
               ['buyer', 'escrow'],
               ['escrow', 'supplier'],
               ['funder', 'supplier'],
+              ['escrow', 'funder'],
+              ['escrow', 'buyer'],
             ] as const
           ).map(([from, to]) => (
             <path
               key={`${from}-${to}`}
               d={pathFor(from, to)}
               fill="none"
-              stroke="currentColor"
-              strokeOpacity={0.14}
+              stroke="#8291a5"
+              strokeOpacity={0.35}
               strokeWidth={2}
               strokeDasharray={from === 'funder' ? '6 6' : undefined}
               markerEnd="url(#flow-arrow)"
             />
           ))}
 
-          <text x="248" y="80" textAnchor="middle" className="fill-current text-[11px] opacity-40">
-            protected
+          {frame.transfers.map((transfer, position) => (
+            <path
+              key={frame.stepId + '-route-' + position}
+              d={pathFor(transfer.from, transfer.to)}
+              fill="none"
+              stroke={POOL_COLOUR[transfer.pool]}
+              strokeWidth={4}
+              strokeDasharray="10 10"
+              strokeOpacity={0.9}
+            >
+              {!reduced && (
+                <animate
+                  attributeName="stroke-dashoffset"
+                  from="20"
+                  to="0"
+                  dur="0.8s"
+                  repeatCount="indefinite"
+                />
+              )}
+            </path>
+          ))}
+
+          <text x="250" y="103" textAnchor="middle" fill="#9bbcff" fontSize="12">
+            BUYER PROTECTION
           </text>
-          <text x="400" y="368" textAnchor="middle" className="fill-current text-[11px] opacity-40">
-            advance — never through escrow
+          <text x="410" y="376" textAnchor="middle" fill="#72e7b5" fontSize="12">
+            FUNDER ADVANCE · NEVER THROUGH ESCROW
           </text>
 
           {(Object.keys(NODES) as Party[]).map((party) => (
@@ -145,6 +190,8 @@ export function TradeFlow({
               active={frame.active.includes(party)}
               balance={balanceOf(frame, party)}
               scale={scale}
+              selected={focusedParty === party}
+              onSelect={() => setFocusedParty((current) => (current === party ? null : party))}
             />
           ))}
 
@@ -155,64 +202,146 @@ export function TradeFlow({
               path={pathFor(transfer.from, transfer.to)}
               colour={POOL_COLOUR[transfer.pool]}
               amount={transfer.amount}
-              label={transfer.label}
               delay={position * 0.25}
               still={reduced}
             />
           ))}
         </svg>
+        <div className="grid grid-cols-2 gap-3 p-4 md:hidden">
+          {(Object.keys(NODES) as Party[]).map((party) => {
+            const balance = balanceOf(frame, party);
+            const colour =
+              party === 'buyer' || party === 'escrow' ? POOL_COLOUR.protected : POOL_COLOUR.advance;
+            return (
+              <button
+                key={party}
+                type="button"
+                aria-pressed={focusedParty === party}
+                onClick={() => setFocusedParty((current) => (current === party ? null : party))}
+                className="min-h-28 rounded-xl border bg-slate-900 p-3 text-left"
+                style={{ borderColor: frame.active.includes(party) ? colour : '#475569' }}
+              >
+                <span className="block text-sm font-semibold">{NODES[party].label}</span>
+                <span className="block text-[11px] text-slate-400">{NODES[party].sub}</span>
+                <strong className="mt-3 block text-base tabular-nums">
+                  {balance ? formatUsdcUnits(balance.amount) + ' USDC' : 'Starts the payment'}
+                </strong>
+              </button>
+            );
+          })}
+        </div>
+        {frame.transfers.length > 0 && (
+          <div className="space-y-1 px-4 pb-4 md:hidden" aria-hidden="true">
+            {frame.transfers.map((transfer, position) => (
+              <svg
+                key={`${frame.stepId}-mobile-route-${position}`}
+                viewBox="0 0 300 18"
+                className="h-5 w-full"
+              >
+                <path
+                  d="M 10 9 H 290"
+                  stroke={POOL_COLOUR[transfer.pool]}
+                  strokeOpacity={0.45}
+                  strokeWidth={2}
+                />
+                <circle cx={reduced ? 290 : 10} cy={9} r={6} fill={POOL_COLOUR[transfer.pool]}>
+                  {!reduced && (
+                    <animate attributeName="cx" from="10" to="290" dur="2.3s" fill="freeze" />
+                  )}
+                </circle>
+              </svg>
+            ))}
+          </div>
+        )}
+        <div className="flex min-h-12 flex-wrap items-center gap-x-5 gap-y-1 border-t border-slate-700 bg-slate-950/50 px-5 py-3 text-xs text-slate-200">
+          {frame.transfers.length === 0 ? (
+            <span>
+              No money moves in this event. The contract records a decision or commitment.
+            </span>
+          ) : (
+            frame.transfers.map((transfer, position) => (
+              <span
+                key={frame.stepId + '-transfer-' + position}
+                className="inline-flex items-center gap-2"
+              >
+                <span
+                  className="h-2.5 w-2.5 rounded-full"
+                  style={{ background: POOL_COLOUR[transfer.pool] }}
+                />
+                <strong className="tabular-nums">{formatUsdcUnits(transfer.amount)} USDC</strong>
+                <span className="text-slate-400">
+                  {NODES[transfer.from].label} → {NODES[transfer.to].label}
+                </span>
+              </span>
+            ))
+          )}
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          className="rounded-lg border border-border px-3 py-1.5 text-sm"
-          onClick={() => {
-            if (index >= frames.length - 1) onIndexChange(0);
-            setPlaying((current) => !current || index >= frames.length - 1);
-          }}
-        >
-          {playing && index < frames.length - 1
-            ? 'Pause'
-            : index >= frames.length - 1
-              ? 'Replay'
-              : 'Play'}
-        </button>
-
-        <ol className="flex flex-1 flex-wrap items-center gap-1" aria-label="Trade timeline">
-          {frames.map((candidate, position) => (
-            <li key={candidate.stepId}>
-              <button
-                type="button"
-                aria-current={position === index}
-                aria-label={`Step ${position + 1}: ${steps[position]?.title ?? ''}`}
-                title={steps[position]?.title}
-                onClick={() => {
-                  setPlaying(false);
-                  onIndexChange(position);
-                }}
-                className={`h-2.5 rounded-full transition-all ${
-                  position === index
-                    ? 'w-8 bg-foreground'
-                    : candidate.transfers.length > 0
-                      ? 'w-2.5 bg-foreground/40 hover:bg-foreground/70'
-                      : 'w-2.5 bg-foreground/15 hover:bg-foreground/40'
-                }`}
-              />
-            </li>
-          ))}
-        </ol>
-
-        <span className="text-xs tabular-nums text-muted">
-          {index + 1} / {frames.length}
+      <div className="flex min-h-6 flex-wrap items-center justify-between gap-3 text-xs text-muted">
+        <span>
+          {focusedParty
+            ? ROLE_EXPLANATION[focusedParty]
+            : 'Select a role in the map to see what its money means.'}
+        </span>
+        <span className="flex flex-wrap gap-4">
+          <Key colour={POOL_COLOUR.protected} label="Buyer’s protected payment" />
+          <Key colour={POOL_COLOUR.advance} label="Funder’s own capital" />
         </span>
       </div>
 
-      <div className="flex flex-wrap gap-4 text-xs text-muted">
-        <Key colour="var(--protected)" label="Buyer’s protected payment" />
-        <Key colour="var(--capital)" label="Funder’s own capital" />
+      <div className="rounded-2xl border border-border bg-surface p-4 shadow-sm">
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            className="rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-40"
+            onClick={() => goTo(index - 1)}
+            disabled={index === 0}
+          >
+            ← Previous
+          </button>
+          <button
+            type="button"
+            className="rounded-lg bg-foreground px-4 py-2 text-sm font-semibold text-background"
+            onClick={() => {
+              if (index >= frames.length - 1) onIndexChange(0);
+              setPlaying((current) => !current || index >= frames.length - 1);
+            }}
+          >
+            {playing && index < frames.length - 1
+              ? 'Ⅱ Pause'
+              : index >= frames.length - 1
+                ? '↻ Replay'
+                : '▶ Play'}
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-border px-3 py-2 text-sm disabled:opacity-40"
+            onClick={() => goTo(index + 1)}
+            disabled={index >= frames.length - 1}
+          >
+            Next →
+          </button>
+          <span className="ml-auto text-xs font-medium text-muted">{steps[index]?.title}</span>
+        </div>
+        <label className="mt-4 block">
+          <span className="sr-only">Trade timeline</span>
+          <input
+            type="range"
+            min={0}
+            max={frames.length - 1}
+            value={index}
+            onChange={(event) => goTo(Number(event.target.value))}
+            aria-valuetext={`Step ${index + 1}: ${steps[index]?.title ?? ''}`}
+            className="w-full accent-protected"
+          />
+        </label>
+        <div className="flex justify-between text-[11px] text-muted">
+          <span>Trade begins</span>
+          <span>Verification and outcome</span>
+        </div>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -231,57 +360,88 @@ function Node({
   active,
   balance,
   scale,
+  selected,
+  onSelect,
 }: {
   party: Party;
   active: boolean;
   balance: { amount: string; pool: Pool } | null;
   scale: bigint;
+  selected: boolean;
+  onSelect: () => void;
 }) {
   const node = NODES[party];
-  const filled = balance === null ? 0 : Number((BigInt(balance.amount) * 100n) / scale) / 100;
-  const height = Math.max(0, Math.min(1, filled)) * 44;
+  const filled = balance === null ? 0 : Number((BigInt(balance.amount) * 134n) / scale);
+  const colour =
+    party === 'buyer' || party === 'escrow' ? POOL_COLOUR.protected : POOL_COLOUR.advance;
+  const metricLabel =
+    party === 'escrow'
+      ? 'PROTECTED NOW'
+      : party === 'supplier'
+        ? 'RECEIVED SO FAR'
+        : party === 'funder'
+          ? 'CAPITAL AT RISK'
+          : 'RETURNED';
 
   return (
-    <g transform={`translate(${node.x} ${node.y})`} data-testid={`flow-node-${party}`}>
-      <circle
-        r={34}
-        className="fill-background"
-        stroke="currentColor"
-        strokeOpacity={active ? 0.9 : 0.25}
-        strokeWidth={active ? 2.5 : 1.5}
-        style={{ transition: 'stroke-opacity 400ms, stroke-width 400ms' }}
+    <g
+      transform={`translate(${node.x} ${node.y})`}
+      data-testid={`flow-node-${party}`}
+      role="button"
+      tabIndex={0}
+      aria-label={node.label + ': ' + ROLE_EXPLANATION[party]}
+      aria-pressed={selected}
+      onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
+      style={{ cursor: 'pointer' }}
+    >
+      <rect
+        x={-85}
+        y={-48}
+        width={170}
+        height={96}
+        rx={14}
+        fill={active || selected ? '#213854' : '#16243a'}
+        stroke={colour}
+        strokeOpacity={active || selected ? 0.95 : 0.36}
+        strokeWidth={active || selected ? 2.5 : 1.5}
+        style={{ transition: 'fill 350ms, stroke-opacity 350ms' }}
       />
-      {/* The meter fills from the bottom: money you can see accumulating. */}
-      {balance !== null && (
-        <rect
-          x={-34}
-          y={22 - height}
-          width={68}
-          height={height}
-          fill={POOL_COLOUR[balance.pool]}
-          opacity={0.22}
-          style={{ transition: 'height 700ms ease-out, y 700ms ease-out' }}
-          clipPath="url(#flow-node-clip)"
-        />
-      )}
-      <text textAnchor="middle" y={-44} className="fill-current text-[13px] font-medium">
+      <circle cx={68} cy={-31} r={4} fill={active ? colour : '#64748b'} />
+      <text x={-69} y={-17} fill="#f8fafc" fontSize={16} fontWeight={700}>
         {node.label}
       </text>
-      <text textAnchor="middle" y={-30} className="fill-current text-[10px] opacity-50">
+      <text x={-69} y={-1} fill="#9baec5" fontSize={10}>
         {node.sub}
       </text>
       {balance !== null && (
-        <text
-          textAnchor="middle"
-          y={5}
-          className="fill-current text-[13px] font-semibold tabular-nums"
-        >
-          {formatUsdcUnits(balance.amount)}
-        </text>
+        <>
+          <text x={-69} y={17} fill="#9baec5" fontSize={9} letterSpacing={1.2}>
+            {metricLabel}
+          </text>
+          <text x={-69} y={36} fill="#ffffff" fontSize={17} fontWeight={700}>
+            {formatUsdcUnits(balance.amount)} USDC
+          </text>
+          <rect x={-69} y={40} width={134} height={4} rx={2} fill="#34465e" />
+          <rect
+            x={-69}
+            y={40}
+            width={Math.max(0, Math.min(134, filled))}
+            height={4}
+            rx={2}
+            fill={POOL_COLOUR[balance.pool]}
+            style={{ transition: 'width 700ms ease-out' }}
+          />
+        </>
       )}
-      {balance !== null && (
-        <text textAnchor="middle" y={19} className="fill-current text-[9px] opacity-50">
-          USDC
+      {balance === null && (
+        <text x={-69} y={32} fill="#b7c6d8" fontSize={12}>
+          Starts the protected payment
         </text>
       )}
     </g>
@@ -298,35 +458,23 @@ function Coin({
   path,
   colour,
   amount,
-  label,
   delay,
   still,
 }: {
   path: string;
   colour: string;
   amount: string;
-  label: string;
   delay: number;
   still: boolean;
 }) {
+  if (still) return null;
   return (
-    <g data-testid="flow-coin" data-amount={amount}>
+    <g data-testid="flow-coin" data-amount={amount} aria-hidden="true">
       <g>
-        {!still && (
-          <animateMotion dur="1.9s" begin={`${delay}s`} fill="freeze" path={path} rotate="0" />
-        )}
-        <circle r={21} fill={colour} opacity={0.95} />
-        <text
-          textAnchor="middle"
-          y={4}
-          className="text-[11px] font-semibold tabular-nums"
-          fill="#ffffff"
-        >
-          {formatUsdcUnits(amount)}
-        </text>
-        <text textAnchor="middle" y={36} className="fill-current text-[10px]" opacity={0.7}>
-          {label}
-        </text>
+        <animateMotion dur="2.3s" begin={`${delay}s`} fill="freeze" path={path} />
+        <circle r={18} fill={colour} opacity={0.25} />
+        <circle r={12} fill={colour} />
+        <circle r={4} fill="#ffffff" opacity={0.9} />
       </g>
     </g>
   );
