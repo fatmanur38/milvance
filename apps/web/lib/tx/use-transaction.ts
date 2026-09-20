@@ -61,7 +61,9 @@ export function useContractTransaction(): ContractTransaction {
           },
         });
         dispatch({ type: 'confirmed', hash: result.hash, ledger: result.ledger });
-        const outcome = await waitForIndexer(result.ledger, api.indexerStatus);
+        const outcome = await waitForIndexer(result.ledger, api.indexerStatus, {
+          nudge: api.nudgeIndexer,
+        });
         await queryClient.invalidateQueries({ queryKey: queryKeys.chain });
         dispatch({ type: outcome === 'synced' ? 'synced' : 'sync-delayed' });
         return true;

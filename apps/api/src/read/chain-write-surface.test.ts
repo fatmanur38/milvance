@@ -1,11 +1,12 @@
 import 'reflect-metadata';
 
 import { RequestMethod } from '@nestjs/common';
-import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { METHOD_METADATA, PATH_METADATA, ROUTE_ARGS_METADATA } from '@nestjs/common/constants';
 import { describe, expect, it } from 'vitest';
 
 import { DemoController } from '../demo/demo.controller';
 import { HealthController } from '../health/health.controller';
+import { IndexerController } from '../indexer/indexer.controller';
 import { MetricsController } from '../metrics/metrics.controller';
 import { ReadController } from './read.controller';
 
@@ -21,6 +22,10 @@ import { ReadController } from './read.controller';
  * Evidence and local-payment metadata are deliberately NOT in this list: they
  * are off-chain metadata with legitimate writes, and neither can change a
  * financial column.
+ *
+ * The indexer controller is the one exception that proves the rule. Its routes
+ * DO change chain-derived rows — that is what indexing is — but never from
+ * anything the caller said. It is checked separately below.
  */
 const CHAIN_DERIVED_CONTROLLERS = [ReadController, HealthController, MetricsController];
 
@@ -80,6 +85,34 @@ describe('chain-derived write surface', () => {
       expect(`${controllerPath}/${route.path ?? ''}`).not.toMatch(
         /order|milestone|funding|settle|refund|evidence/i,
       );
+    }
+  });
+});
+
+describe('the indexer write surface', () => {
+  /** Nest's parameter decorator for a request body. */
+  const BODY_PARAM = 3;
+
+  it('accepts no request body on any route that advances the read model', () => {
+    // These two routes write chain-derived rows, so the guarantee cannot be
+    // "no writes". It is narrower and stronger: there is nowhere to put an
+    // event. Every value they store is read from the configured Stellar RPC,
+    // so a caller cannot describe a settlement that the contract never made.
+    const args =
+      (Reflect.getMetadata(ROUTE_ARGS_METADATA, IndexerController) as
+        Record<string, unknown> | undefined) ?? {};
+
+    const bodyParams = Object.keys(args).filter((key) => key.startsWith(`${BODY_PARAM}:`));
+    expect(bodyParams).toEqual([]);
+  });
+
+  it('exposes no route that rewinds a cursor or drops a read model', () => {
+    // `replay` and `reset` exist, and they stay on the CLI. Over HTTP there is
+    // no way to make the indexer forget what it has seen.
+    const paths = routes(IndexerController).map((route) => route.path);
+    expect(paths).toEqual(['internal/indexer/tick', 'indexer/catch-up']);
+    for (const path of paths) {
+      expect(path).not.toMatch(/replay|reset|rewind|cursor/i);
     }
   });
 });

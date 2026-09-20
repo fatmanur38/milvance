@@ -90,6 +90,12 @@ export interface IndexerProgress {
  * Polls rather than guessing a delay. API errors while polling are tolerated:
  * the transaction is already final on chain, so a flaky read is a reason to
  * keep waiting, not a reason to report failure.
+ *
+ * Where the indexer runs on a schedule rather than continuously, `nudge` asks
+ * it to run now. That is a request about TIMING and nothing else — it names no
+ * ledger, carries no data, and a service that ignores it only makes the wait
+ * longer. Failing to nudge is therefore never failing to sync, and the outcome
+ * is always decided by what the indexer reports about its own progress.
  */
 export async function waitForIndexer(
   ledger: number,
@@ -97,18 +103,32 @@ export async function waitForIndexer(
   options: {
     intervalMs?: number;
     timeoutMs?: number;
+    nudge?: () => Promise<unknown>;
+    nudgeIntervalMs?: number;
     sleep?: (ms: number) => Promise<void>;
     now?: () => number;
   } = {},
 ): Promise<'synced' | 'delayed'> {
   const interval = options.intervalMs ?? 2_000;
   const timeout = options.timeoutMs ?? 90_000;
+  // Far less often than we poll: the service throttles these anyway, and a
+  // read is cheap where a tick is not.
+  const nudgeInterval = options.nudgeIntervalMs ?? 10_000;
   const sleep = options.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const now = options.now ?? (() => Date.now());
   const target = BigInt(ledger);
   const deadline = now() + timeout;
+  let nextNudge = now();
 
   for (;;) {
+    if (options.nudge !== undefined && now() >= nextNudge) {
+      nextNudge = now() + nudgeInterval;
+      try {
+        await options.nudge();
+      } catch {
+        // See above: this only ever changes how soon, not whether.
+      }
+    }
     try {
       const status = await readStatus();
       if (status.scannedThroughLedger !== null && BigInt(status.scannedThroughLedger) >= target) {

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 
 import type { Prisma } from '../generated/prisma/client';
-import type { ApiConfig } from '../config';
+import type { ApiConfig, IndexerTickLimits } from '../config';
 import { PrismaService } from '../prisma/prisma.service';
 import { compareEventOrder, fieldsToJson, type DecodedEvent } from './decoder';
 import { eventLogRow, projectEvent, type ProjectionContext } from './projector';
@@ -46,6 +46,28 @@ export interface IndexerRunResult {
   readonly duplicatesSkipped: number;
   readonly caughtUp: boolean;
   readonly latestLedger: bigint;
+}
+
+/**
+ * The outcome of one bounded tick, small enough to be an HTTP response and
+ * free of anything an operator could not paste into a support channel.
+ */
+export interface IndexerTickResult {
+  /**
+   * `already_running` means another tick holds the stream and `throttled`
+   * means a cooldown declined to start one. Neither is an error: the work is
+   * simply somebody else's turn.
+   */
+  readonly status: 'ran' | 'already_running' | 'throttled';
+  readonly fromLedger: string | null;
+  readonly toLedger: string | null;
+  readonly pagesFetched: number;
+  readonly eventsProcessed: number;
+  readonly eventsProjected: number;
+  readonly duplicatesSkipped: number;
+  /** False when a limit stopped the tick with backlog left to do. */
+  readonly caughtUp: boolean;
+  readonly durationMs: number;
 }
 
 export interface IndexerStatus {
@@ -148,10 +170,122 @@ export class IndexerService {
    * keeps everything it had already committed and resumes from there.
    */
   async catchUp(maxPages = 50): Promise<IndexerRunResult> {
+    return this.run({
+      maxPages,
+      // A worker run is bounded by pages only. Nothing is waiting on it, so
+      // there is no deadline to respect and no reason to stop early.
+      maxEvents: Number.POSITIVE_INFINITY,
+      maxSeconds: Number.POSITIVE_INFINITY,
+    });
+  }
+
+  /**
+   * One bounded unit of indexing, safe to trigger from an external scheduler.
+   *
+   * This is the SAME ingestion path `catchUp` uses — the projector, the cursor
+   * discipline and the transaction boundaries are not duplicated or relaxed.
+   * The only differences are that it stops at a limit instead of at chain head,
+   * and that it takes a lease first so a scheduler firing on top of a running
+   * tick is a no-op rather than a second writer.
+   *
+   * Stopping early is not data loss. The cursor only ever advances over events
+   * that were stored, so `caughtUp: false` simply means the next tick has work
+   * waiting for it.
+   */
+  async tick(limits: IndexerTickLimits = this.config.indexer.tick): Promise<IndexerTickResult> {
+    const startedAt = Date.now();
+    const idle = (status: IndexerTickResult['status'], from: string | null): IndexerTickResult => ({
+      status,
+      fromLedger: from,
+      toLedger: from,
+      pagesFetched: 0,
+      eventsProcessed: 0,
+      eventsProjected: 0,
+      duplicatesSkipped: 0,
+      caughtUp: false,
+      durationMs: Date.now() - startedAt,
+    });
+
+    const before = await this.ensureCursor();
+    const fromLedger = before.scannedThroughLedger?.toString() ?? null;
+
+    // Same process, already indexing: answer immediately rather than queue.
+    if (this.running) {
+      return idle('already_running', fromLedger);
+    }
+
+    const owner = randomUUID();
+    // The lease outlives the work it guards, then lapses on its own, so a
+    // process killed mid-tick cannot wedge the stream.
+    const leaseSeconds = Number.isFinite(limits.maxSeconds)
+      ? Math.ceil(limits.maxSeconds * 2 + 30)
+      : 300;
+    if (!(await this.acquireTickLease(owner, leaseSeconds))) {
+      return idle('already_running', fromLedger);
+    }
+
+    try {
+      const result = await this.run(limits);
+      const after = await this.prisma.indexerCursor.findUniqueOrThrow({
+        where: { cursor_stream: this.ctx },
+      });
+      return {
+        status: 'ran',
+        fromLedger,
+        toLedger: after.scannedThroughLedger?.toString() ?? null,
+        pagesFetched: result.pagesFetched,
+        eventsProcessed: result.eventsIngested,
+        eventsProjected: result.eventsProjected,
+        duplicatesSkipped: result.duplicatesSkipped,
+        caughtUp: result.caughtUp,
+        durationMs: Date.now() - startedAt,
+      };
+    } finally {
+      await this.releaseTickLease(owner);
+    }
+  }
+
+  /**
+   * Claim the right to index this stream for a while.
+   *
+   * A conditional UPDATE rather than a session advisory lock: Prisma pools
+   * connections, so a lock taken on one connection may be released from
+   * another. A row with an expiry is honest about both cases that matter — a
+   * tick still running, and a tick whose process died.
+   */
+  private async acquireTickLease(owner: string, seconds: number): Promise<boolean> {
+    const claimed = await this.prisma.$executeRaw`
+      UPDATE "IndexerCursor"
+         SET "tickLeaseOwner" = ${owner},
+             "tickLeaseUntil" = NOW() + (${seconds} * INTERVAL '1 second'),
+             "updatedAt" = NOW()
+       WHERE "network" = ${this.ctx.network}
+         AND "contractId" = ${this.ctx.contractId}
+         AND ("tickLeaseUntil" IS NULL OR "tickLeaseUntil" < NOW())
+    `;
+    return claimed === 1;
+  }
+
+  /** Release only our own lease: a lapsed one may already belong to someone else. */
+  private async releaseTickLease(owner: string): Promise<void> {
+    await this.prisma.$executeRaw`
+      UPDATE "IndexerCursor"
+         SET "tickLeaseOwner" = NULL, "tickLeaseUntil" = NULL, "updatedAt" = NOW()
+       WHERE "network" = ${this.ctx.network}
+         AND "contractId" = ${this.ctx.contractId}
+         AND "tickLeaseOwner" = ${owner}
+    `;
+  }
+
+  /**
+   * The ingestion loop. Every mode of this indexer goes through here.
+   */
+  private async run(limits: IndexerTickLimits): Promise<IndexerRunResult> {
     if (this.running) {
       throw new Error('indexer run already in progress in this process');
     }
     this.running = true;
+    const deadline = Date.now() + limits.maxSeconds * 1000;
     let pagesFetched = 0;
     let eventsIngested = 0;
     let eventsProjected = 0;
@@ -160,7 +294,9 @@ export class IndexerService {
     let caughtUp = false;
 
     try {
-      for (let page = 0; page < maxPages; page += 1) {
+      // Limits are checked between pages, never inside one: a page is stored
+      // whole or not at all, and no event is ever skipped to finish sooner.
+      while (pagesFetched < limits.maxPages) {
         const cursor = await this.ensureCursor();
         const query =
           cursor.lastEventId === null
@@ -186,8 +322,8 @@ export class IndexerService {
         } catch (error) {
           if (error instanceof StaleIndexerCursorError) {
             // Another worker committed the page (or reset the stream) while we
-            // fetched it. Read the new cursor and fetch again.
-            page -= 1;
+            // fetched it. Read the new cursor and fetch again. The retry costs
+            // a page of budget, so this can never spin.
             continue;
           }
           throw error;
@@ -198,6 +334,9 @@ export class IndexerService {
 
         if (ordered.length === 0) {
           caughtUp = true;
+          break;
+        }
+        if (eventsIngested >= limits.maxEvents || Date.now() >= deadline) {
           break;
         }
       }

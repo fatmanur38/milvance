@@ -28,6 +28,52 @@ const CREDENTIALS = {
 
 const AT = new Date('2026-09-20T03:30:00Z');
 
+describe('signing against an endpoint that has a path of its own', () => {
+  // Supabase Storage's S3 endpoint is not a bare origin: it ends in
+  // `/storage/v1/s3`. A prefix dropped from the URL is also missing from the
+  // canonical request, so the failure is a 403 with a correct-looking key —
+  // exactly the kind that only appears once real credentials exist.
+  const SUPABASE = {
+    endpoint: 'https://abcdefghijklmnop.storage.supabase.co/storage/v1/s3',
+    bucket: 'milvance-evidence',
+    region: 'eu-central-1',
+    accessKeyId: 'AKIAIOSFODNN7EXAMPLE',
+    secretAccessKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+  };
+
+  it('keeps the endpoint path in the request URL', () => {
+    const signed = signS3Request(SUPABASE, 'PUT', 'evidence/ab/cd.bin', new Uint8Array([1]), AT);
+
+    expect(signed.url).toBe(
+      'https://abcdefghijklmnop.storage.supabase.co/storage/v1/s3/milvance-evidence/evidence/ab/cd.bin',
+    );
+  });
+
+  it('signs the same path it sends', () => {
+    // The signature must change when the prefix does. If the prefix were being
+    // ignored, these two would be identical.
+    const withPrefix = signS3Request(SUPABASE, 'GET', 'evidence/ab/cd.bin', new Uint8Array(), AT);
+    const withoutPrefix = signS3Request(
+      { ...SUPABASE, endpoint: 'https://abcdefghijklmnop.storage.supabase.co' },
+      'GET',
+      'evidence/ab/cd.bin',
+      new Uint8Array(),
+      AT,
+    );
+
+    expect(withPrefix.headers.Authorization).not.toBe(withoutPrefix.headers.Authorization);
+    expect(withPrefix.headers.Authorization).toContain('/20260920/eu-central-1/s3/aws4_request');
+  });
+
+  it('is unchanged for an endpoint that is a bare origin', () => {
+    // R2 and AWS must sign exactly as they did before the prefix existed.
+    const signed = signS3Request(CREDENTIALS, 'PUT', 'evidence/ab/cd.bin', new Uint8Array([1]), AT);
+    expect(signed.url).toBe(
+      'https://accountid.r2.cloudflarestorage.com/milvance-evidence/evidence/ab/cd.bin',
+    );
+  });
+});
+
 describe('signing an S3 request', () => {
   it('produces a complete SigV4 authorization for a PUT', () => {
     const signed = signS3Request(CREDENTIALS, 'PUT', 'evidence/ab/cd.bin', new Uint8Array([1]), AT);

@@ -1,5 +1,13 @@
 # Milvance — Deployment
 
+> **On the `deploy/free-hackathon` branch this document describes the shape, not
+> the manifests.** That branch runs the same product entirely on free tiers —
+> Supabase for PostgreSQL and private storage, one Render free web service, and
+> a scheduled indexer tick instead of an always-on worker — and its `render.yaml`
+> is written for that. Follow
+> [FREE_HACKATHON_DEPLOYMENT.md](FREE_HACKATHON_DEPLOYMENT.md) there. Everything
+> below remains the shape to deploy when reliability matters more than cost.
+
 Four things have to run for Milvance to be publicly testable, plus two that
 already exist and are not ours to deploy.
 

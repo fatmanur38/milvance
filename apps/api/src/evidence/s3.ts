@@ -8,8 +8,8 @@ import { createHash, createHmac } from 'node:crypto';
  * repository that becomes public and has to be read by judges. Every byte of
  * the signing process is here to be audited.
  *
- * Works against AWS S3, Cloudflare R2, MinIO and anything else that speaks
- * SigV4 with path-style addressing. Credentials are read from server-side
+ * Works against AWS S3, Cloudflare R2, MinIO, Supabase Storage and anything
+ * else that speaks SigV4 with path-style addressing. Credentials are read from server-side
  * configuration only; nothing here is reachable from the browser bundle.
  */
 
@@ -46,9 +46,19 @@ function encodeSegment(segment: string): string {
   );
 }
 
-function canonicalPath(bucket: string, key: string): string {
+/**
+ * `/<endpoint path>/<bucket>/<key>`, path-style.
+ *
+ * The endpoint's own path matters. AWS, R2 and MinIO expose a bare origin, but
+ * Supabase Storage's S3 endpoint ends in `/storage/v1/s3`, and a prefix that is
+ * dropped from the URL is also missing from the canonical request — so the
+ * signature would be wrong as well as the address. Both are built here, from
+ * the same pieces, for that reason.
+ */
+function canonicalPath(endpoint: URL, bucket: string, key: string): string {
+  const prefix = endpoint.pathname.split('/').filter((part) => part !== '');
   const segments = key.split('/').filter((part) => part !== '');
-  return `/${encodeSegment(bucket)}/${segments.map(encodeSegment).join('/')}`;
+  return `/${[...prefix, bucket, ...segments].map(encodeSegment).join('/')}`;
 }
 
 export interface SignedRequest {
@@ -72,7 +82,7 @@ export function signS3Request(
   const amzDate = `${now.toISOString().replace(/[-:]/g, '').slice(0, 15)}Z`;
   const dateStamp = amzDate.slice(0, 8);
   const payloadHash = sha256Hex(payload);
-  const path = canonicalPath(credentials.bucket, key);
+  const path = canonicalPath(endpoint, credentials.bucket, key);
 
   const canonicalRequest = [
     method,

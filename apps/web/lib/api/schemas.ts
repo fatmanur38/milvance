@@ -227,6 +227,15 @@ export const readinessSchema = z.object({
   time: isoDate,
 });
 
+/**
+ * The reply to a catch-up nudge. Only the fields the workspace acts on: the
+ * result is a hint about timing, never a source of financial state.
+ */
+export const indexerNudgeSchema = z.object({
+  status: z.enum(['ran', 'already_running', 'throttled']),
+  caughtUp: z.boolean(),
+});
+
 export const indexerStatusSchema = z.object({
   scannedThroughLedger: integerString.nullable(),
   chainHead: integerString.nullable(),

@@ -7,6 +7,7 @@ import {
   activitySchema,
   evidenceUploadSchema,
   funderOffersSchema,
+  indexerNudgeSchema,
   indexerStatusSchema,
   milestoneDisputesSchema,
   milestoneEvidenceSchema,
@@ -86,6 +87,14 @@ export const api = {
     }),
   readiness: () => apiRequest('/health/ready', readinessSchema),
   indexerStatus: () => apiRequest('/indexer/status', indexerStatusSchema),
+  /**
+   * Ask the service to index now rather than at its next scheduled run.
+   *
+   * A hint, not an instruction: it carries no body, cannot name a ledger, and
+   * the service is free to decline. Used only after Stellar has already
+   * confirmed a transaction, so the chain is not waiting on the answer.
+   */
+  nudgeIndexer: () => apiRequest('/indexer/catch-up', indexerNudgeSchema, { method: 'POST' }),
   /** This wallet's own Trade Lab consent state. Consent metadata, never usage proof. */
   participant: (address: string) =>
     apiRequest(`/demo/participants/${enc(address)}`, participantSchema),

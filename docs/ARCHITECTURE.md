@@ -182,6 +182,34 @@ Vercel                Render                       Render              Cloudflar
 Deployment details, environment variables and the migration command are in
 [DEPLOYMENT.md](DEPLOYMENT.md).
 
+### When there is no always-on worker
+
+The free hackathon deployment cannot run that worker: its host has no free
+background process. So the indexer runs as a **tick** instead — a bounded unit
+of the same work, called once a minute by an external scheduler.
+
+```text
+Supabase Cron ──► POST /api/internal/indexer/tick ──► the same ingestion code
+   every 60s          bearer secret, no body              the worker runs
+```
+
+What changes is _when_ indexing runs. What does not change is anything that
+makes it trustworthy:
+
+- the same projector, the same cursor, the same transaction boundaries
+- one writer at a time, enforced by a lease on the stream rather than by there
+  being only one process
+- a tick that hits a limit reports `caughtUp: false` and stops; it never skips
+  an event to finish sooner, and the cursor never moves past something that
+  was not stored
+
+The read model can therefore be up to a minute behind chain, which
+`/api/health/ready` reports as degraded rather than hiding. Nothing financial
+depends on it: Soroban is still the truth, and the database is still something
+you can delete.
+
+See [FREE_HACKATHON_DEPLOYMENT.md](FREE_HACKATHON_DEPLOYMENT.md).
+
 ## Further reading
 
 | Document                                        | Covers                                           |

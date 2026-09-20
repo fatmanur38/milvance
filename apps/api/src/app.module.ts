@@ -5,6 +5,7 @@ import { DemoController } from './demo/demo.controller';
 import { createEvidenceStorage, type EvidenceStorage } from './evidence/storage';
 import { EvidenceController } from './evidence/evidence.controller';
 import { HealthController } from './health/health.controller';
+import { IndexerController } from './indexer/indexer.controller';
 import { IndexerService } from './indexer/indexer.service';
 import { LocalPaymentsController } from './local-payments/local-payments.controller';
 import { MetricsController } from './metrics/metrics.controller';
@@ -32,6 +33,7 @@ import { API_CONFIG, EVIDENCE_STORAGE } from './tokens';
     LocalPaymentsController,
     MetricsController,
     DemoController,
+    IndexerController,
   ],
   providers: [
     { provide: API_CONFIG, useFactory: (): ApiConfig => loadConfig() },
