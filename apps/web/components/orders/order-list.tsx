@@ -70,7 +70,7 @@ export function OrderList({ wallet }: { wallet: string }) {
               role="tab"
               aria-selected={filter === value}
               onClick={() => setFilter(value)}
-              className={`rounded-md px-3 py-1 text-sm ${filter === value ? 'bg-surface font-medium shadow-sm' : 'text-muted'}`}
+              className={`rounded-md px-3 py-1 text-sm ${filter === value ? 'bg-surface font-medium shadow-card' : 'text-muted'}`}
             >
               {value === 'all' ? 'All' : `As ${ROLE_LABELS[value].toLowerCase()}`}
             </button>

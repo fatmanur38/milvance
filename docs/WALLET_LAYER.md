@@ -29,12 +29,13 @@ ledger 4,765,836, and later orders have raised `order_count`.
 
 ## Live check
 
-1. Run `pnpm --filter @milvance/web dev` and open `http://localhost:3000/wallet` in
+1. Run `pnpm --filter @milvance/web dev` and open `http://localhost:3000/app` in
    the browser with Freighter installed.
-2. Select **Stellar Testnet** in Freighter and connect. Fund the account on Testnet
-   so it can pay transaction fees. The page checks the network passphrase against
-   `deployments/testnet.json`; any other network blocks transactions.
-3. The page checks Horizon for the approved Testnet USDC trustline and identifies
+2. Select **Stellar Testnet** in Freighter and connect from the wallet chip in the
+   header. Fund the account on Testnet so it can pay transaction fees. The app
+   checks the network passphrase against `deployments/testnet.json`; any other
+   network blocks transactions.
+3. The app checks Horizon for the approved Testnet USDC trustline and identifies
    missing or unfunded accounts. An empty order does not transfer USDC, so a
    trustline is not required for this one action. Add the approved USDC trustline
    in Freighter before future USDC transfers.

@@ -11,29 +11,45 @@ import { useWallet } from '@/lib/wallet/provider';
 import { Card, EmptyState, Loading, Notice } from '../ui/primitives';
 import { WalletNotice } from '../wallet/wallet-chip';
 
+/**
+ * The same three ideas the landing page opens with, in the same colours.
+ *
+ * A judge who arrives here from the tour should not have to re-learn what blue
+ * and green mean: those two are the product's only load-bearing colours.
+ */
+const EXPLAINER = [
+  {
+    dot: 'bg-protected',
+    title: 'Buyer money is protected',
+    titleClass: 'text-protected',
+    body: 'The buyer locks each milestone payment on Stellar. It is not paid to the supplier early.',
+  },
+  {
+    dot: 'bg-capital',
+    title: 'Funder money is working capital',
+    titleClass: 'text-capital',
+    body: 'A separate funder advances its own money to the supplier now, and is repaid first on verification.',
+  },
+  {
+    dot: 'bg-border-strong',
+    title: 'Local money at the edge',
+    titleClass: '',
+    body: 'The supplier converts the advance to TRY for materials and wages. Humans verify evidence; Soroban enforces the payout.',
+  },
+] as const;
+
 function Explainer() {
   return (
-    <Card aria-label="How Milvance works" className="grid gap-4 text-sm md:grid-cols-3">
-      <div>
-        <p className="font-semibold text-protected">Buyer money is protected</p>
-        <p className="text-muted">
-          The buyer locks each milestone payment on Stellar. It is not paid to the supplier early.
-        </p>
-      </div>
-      <div>
-        <p className="font-semibold text-capital">Funder money is working capital</p>
-        <p className="text-muted">
-          A separate funder advances its own money to the supplier now, and is repaid first on
-          verification.
-        </p>
-      </div>
-      <div>
-        <p className="font-semibold">Local money at the edge</p>
-        <p className="text-muted">
-          The supplier converts the advance to TRY for materials and wages. Humans verify evidence;
-          Soroban enforces the payout.
-        </p>
-      </div>
+    <Card aria-label="How Milvance works" className="grid gap-5 text-sm md:grid-cols-3">
+      {EXPLAINER.map((item) => (
+        <div key={item.title}>
+          <p className="flex items-center gap-2">
+            <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${item.dot}`} />
+            <span className={`font-semibold ${item.titleClass}`}>{item.title}</span>
+          </p>
+          <p className="mt-1.5 leading-relaxed text-muted">{item.body}</p>
+        </div>
+      ))}
     </Card>
   );
 }
@@ -56,8 +72,8 @@ export function OverviewView() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold">Overview</h1>
-        <p className="text-sm text-muted">
+        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Overview</h1>
+        <p className="mt-1 text-sm text-muted">
           Protected production payments and working capital, milestone by milestone.
         </p>
       </div>

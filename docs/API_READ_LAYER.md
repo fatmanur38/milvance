@@ -180,9 +180,16 @@ SAC `CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA`.
 
 ## Development limits
 
-The local evidence driver is intended for local/hackathon operation; a durable
-S3-compatible driver needs deployment credentials and is not configured in
-PKG-08. Browser-reported Anchor records remain unverified metadata, so the
-completed local-payment cycle count stays zero until a later package provides
-independent linking and verification. Public metrics expose backend read data;
-the traction dashboard UI belongs to PKG-11.
+The `local-dev` evidence driver writes to a directory and is intended for local
+operation only, because a container's disk does not survive a redeploy. A
+durable `s3` driver ships alongside it and works against any S3-compatible
+bucket; it needs deployment credentials, so it is off by default. See
+[deployment](DEPLOYMENT.md) for the five variables it requires.
+
+Browser-reported Anchor records start as unverified metadata. They become
+evidence only when the Stellar side of the report is checked against Horizon —
+asset, direction, wallet and exact amount — which
+`pnpm --filter @milvance/api cycles verify` performs. A report that fails is
+recorded as `MISMATCHED` with its reason and supports no metric. Only a
+confirmed leg can close a local-payment finance cycle; see
+[public metrics](METRICS.md) for the current figures and what they mean.

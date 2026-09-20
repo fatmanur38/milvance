@@ -295,7 +295,7 @@ export function TradeFlow({
         </span>
       </div>
 
-      <div className="rounded-2xl border border-border bg-surface p-4 shadow-sm">
+      <div className="rounded-2xl border border-border bg-surface p-4 shadow-card">
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"

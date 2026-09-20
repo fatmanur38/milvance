@@ -158,6 +158,14 @@ Explorer link on the settlement.
 > label our own wallets as traction. Each metric carries its definition and its
 > source."
 
+Point at the north-star metric.
+
+> "Completed local-payment finance cycles: one. That milestone was protected by
+> the buyer, financed by an independent funder, verified, settled funder-first,
+> and then converted into lira by the supplier — and the Stellar side of that
+> conversion was confirmed against Horizon, not just reported by the Anchor.
+> That is the whole loop, closed once, end to end."
+
 Point at a contradicted Anchor report if one is showing.
 
 > "That's a report whose transaction hash doesn't match what Stellar records.

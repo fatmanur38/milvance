@@ -87,8 +87,8 @@ account, then through the real browser UI with a Freighter-signed session.
 
 ## Proof 2 — browser run signed with Freighter
 
-The same two flows were then driven entirely from `http://localhost:3000/anchor`
-by a human using the Freighter extension. Every Stellar signature came from the
+The same two flows were then driven entirely from the local-payments screen
+(`/app/anchor`) by a human using the Freighter extension. Every Stellar signature came from the
 browser wallet; no key was ever held by Milvance. Both hashes below were verified
 independently against Horizon rather than taken from the UI.
 
@@ -130,6 +130,37 @@ independently against Horizon rather than taken from the UI.
 
 No secret key, JWT or KYC material appears in this repository or in either proof.
 
+## Proof 3 — the supplier's round trip, which closed the finance cycle
+
+The two proofs above were run by the demo buyer wallet. The north-star metric
+needs something narrower: a conversion belonging to **a party of a financed
+trade**, so that local money can be tied to the production it paid for.
+
+The supplier account `GBBS3FS2…YHXQ` — the same account that received the
+funder's 8 USDC advance and the 1 USDC settlement remainder on order #2 — ran
+both directions on `2026-09-20`:
+
+| Direction  | Quoted                         | Stellar leg                                                                                                                                   | Horizon verdict |
+| ---------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
+| TRY → USDC | 1,000.00 TRY → 20.3960908 USDC | [`8d45d8a7…`](https://stellar.expert/explorer/testnet/tx/8d45d8a7587e112fe0f80bd0a675e6c2de20259ba14d28cfc9990c29c390097d) · ledger 4,772,329 | **CONFIRMED**   |
+| USDC → TRY | 20 USDC → 970.82 TRY           | [`4cbcfc00…`](https://stellar.expert/explorer/testnet/tx/4cbcfc00ec92e9ef6644578d047c27c871f24edb4130db249d2a65dad70911ff) · ledger 4,772,334 | **CONFIRMED**   |
+
+The off-ramp is what closed the cycle. `cycles verify` checks it the same way it
+checks every other report — the payment must be the approved USDC asset, in the
+reported direction, for the reported amount, from the reported wallet — and only
+then does the milestone count. **Completed local-payment finance cycles: 1.**
+
+### And one report that does not count
+
+The first on-ramp ever recorded, from the buyer wallet on 2026-09-19, is stored
+as `MISMATCHED`. Its reported hash `972f19ea…` is a real successful transaction,
+but Horizon shows it paying **20.3960908 USDC to a different account** than the
+one that reported it. The mock Anchor pays every 1,000 TRY conversion the same
+amount, so amount-matching alone would have accepted it — which is exactly why
+amount-matching alone is not what the verifier does.
+
+That record is still published, still labelled, and still supports nothing.
+
 ## Memo handling
 
 A SEP-6 withdrawal is matched to its payment by memo. `planWithdrawalPayment`
@@ -141,9 +172,9 @@ memo type `id`; `text` and `hash` are handled too.
 
 1. `cp .env.example .env` and keep `NEXT_PUBLIC_ANCHOR_MOCK_MODE=true` for the
    sandbox.
-2. `pnpm --filter @milvance/web dev`, then open `http://localhost:3000/wallet` and
-   connect Freighter on Stellar Testnet.
-3. Open `http://localhost:3000/anchor`.
+2. `pnpm --filter @milvance/web dev`, then open `http://localhost:3000/app` and
+   connect Freighter on Stellar Testnet from the wallet chip in the header.
+3. Open `http://localhost:3000/app/anchor`.
 4. **Sign in to the local-payment provider** — Freighter will ask you to sign the
    Anchor's challenge. This proves your account to the Anchor; it moves no money.
 5. **Complete verification** (simulated KYC).

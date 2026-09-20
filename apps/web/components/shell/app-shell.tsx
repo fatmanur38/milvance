@@ -24,13 +24,22 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="border-b border-border bg-surface">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-3">
-          <div className="flex items-center gap-8">
-            <Link href="/app" className="text-lg font-semibold tracking-tight">
+      {/*
+        Sticky, because the wallet chip is the answer to "who am I signing as?"
+        and that question comes up at the bottom of a long order page as often
+        as at the top.
+      */}
+      <header className="sticky top-0 z-30 border-b border-border bg-surface/85 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-3 px-6 py-3">
+          <div className="flex min-w-0 items-center gap-6">
+            <Link
+              href="/"
+              className="text-lg font-semibold tracking-tight whitespace-nowrap"
+              aria-label="Milvance home"
+            >
               Milvance
             </Link>
-            <nav aria-label="Workspace" className="flex flex-wrap gap-1">
+            <nav aria-label="Workspace" className="flex flex-wrap items-center gap-0.5">
               {NAV.map((item) => {
                 const active =
                   'exact' in item ? pathname === item.href : pathname?.startsWith(item.href);
@@ -40,8 +49,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                     href={item.href}
                     aria-current={active ? 'page' : undefined}
                     className={cn(
-                      'rounded-md px-3 py-1.5 text-sm',
-                      active ? 'bg-background font-medium' : 'text-muted hover:text-foreground',
+                      'rounded-lg px-3 py-1.5 text-sm transition',
+                      active
+                        ? 'bg-background font-medium text-foreground shadow-card'
+                        : 'text-muted hover:bg-background hover:text-foreground',
                     )}
                   >
                     {item.label}
@@ -54,12 +65,20 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </header>
       <ServiceBanner />
-      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-6 py-8">
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-6 py-8 sm:py-10">
         {children}
       </main>
-      <footer className="border-t border-border px-6 py-4 text-center text-xs text-muted">
-        Stellar Testnet · Soroban holds the money and enforces the rules · this workspace only reads
-        it and asks your wallet to sign
+      <footer className="mt-4 border-t border-border">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-x-3 gap-y-1 px-6 py-5 text-center text-xs text-muted">
+          <span className="inline-flex items-center gap-1.5">
+            <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-capital" />
+            Stellar Testnet
+          </span>
+          <span aria-hidden>·</span>
+          <span>Soroban holds the money and enforces the rules</span>
+          <span aria-hidden>·</span>
+          <span>this workspace only reads it and asks your wallet to sign</span>
+        </div>
       </footer>
     </div>
   );

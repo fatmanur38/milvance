@@ -79,9 +79,13 @@ wallet-signed transactions from five separate accounts.
   → finance → advance → evidence → verify → settle, and a second milestone
   through dispute → refund
 - Real Anchor TRY ⇄ USDC through SEP-10, SEP-38 and SEP-6
+- **One complete local-payment finance cycle** — protected, financed, verified,
+  settled funder-first, and converted to TRY by the supplier, with the Stellar
+  leg confirmed against Horizon rather than merely reported
 - An indexer whose PostgreSQL projections are rebuildable and reconciled
   against the contract
-- Public metrics where every figure carries its definition and provenance
+- Public metrics where every figure carries its definition and provenance,
+  including one reported Anchor leg published as failing its Stellar check
 
 ## Known limitations
 

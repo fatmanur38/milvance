@@ -9,15 +9,21 @@
  *   --protected  buyer money held on Stellar — protected, NOT supplier cash
  *   --capital    funder working capital — usable money, from the funder
  *
- * If those two ever looked alike, the product would be lying.
+ * If those two ever looked alike, the product would be lying. Everything else
+ * here — greys, elevation, spacing — exists to stay out of their way, which is
+ * why the neutral ramp is cool and desaturated rather than another blue.
  */
 :root {
-  --background: #f7f8fa;
+  --background: #f6f7f9;
+  /* A second background, for the page behind a panel that is itself a surface. */
+  --background-deep: #eef0f4;
   --surface: #ffffff;
-  --foreground: #111827;
-  --muted: #6b7280;
-  --border: #e5e7eb;
-  --accent: #1f3a5f;
+  --surface-raised: #ffffff;
+  --foreground: #0f1729;
+  --muted: #5b6577;
+  --border: #e2e5eb;
+  --border-strong: #cfd4de;
+  --accent: #14304f;
   --accent-foreground: #ffffff;
 
   --protected: #1d4ed8;
@@ -28,17 +34,24 @@
   --attention-soft: #fffbeb;
   --danger: #b91c1c;
   --danger-soft: #fef2f2;
+
+  /* Elevation. Three steps only: flat, card, floating. */
+  --elevation-card: 0 1px 2px rgb(15 23 41 / 0.04), 0 1px 3px rgb(15 23 41 / 0.06);
+  --elevation-raised: 0 2px 4px rgb(15 23 41 / 0.04), 0 8px 24px -8px rgb(15 23 41 / 0.14);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0b0f17;
+    --background: #0a0e16;
+    --background-deep: #070a11;
     --surface: #111827;
-    --foreground: #e5e7eb;
-    --muted: #9ca3af;
-    --border: #1f2937;
-    --accent: #93c5fd;
-    --accent-foreground: #0b0f17;
+    --surface-raised: #161f31;
+    --foreground: #e8ebf1;
+    --muted: #97a1b3;
+    --border: #1e2739;
+    --border-strong: #2c3750;
+    --accent: #9cc2ff;
+    --accent-foreground: #08101f;
 
     --protected: #93b4ff;
     --protected-soft: #111c33;
@@ -48,15 +61,21 @@
     --attention-soft: #2a2110;
     --danger: #fca5a5;
     --danger-soft: #2a1414;
+
+    --elevation-card: 0 1px 2px rgb(0 0 0 / 0.4);
+    --elevation-raised: 0 2px 4px rgb(0 0 0 / 0.3), 0 12px 32px -8px rgb(0 0 0 / 0.6);
   }
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-background-deep: var(--background-deep);
   --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-protected: var(--protected);
@@ -67,10 +86,52 @@
   --color-attention-soft: var(--attention-soft);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
+
+  --shadow-card: var(--elevation-card);
+  --shadow-raised: var(--elevation-raised);
+
+  /*
+   * The native UI font of whatever device this opens on. Deliberately not a
+   * downloaded webfont: a demo must not depend on a font CDN being reachable
+   * at build time or on stage.
+   */
+  --font-sans:
+    ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-feature-settings: 'tnum' 1;
+  font-family: var(--font-sans);
+  /* Tabular figures everywhere: money in a column must line up. */
+  font-feature-settings:
+    'tnum' 1,
+    'cv05' 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Headings carry the hierarchy, so they get the tighter optical treatment. */
+h1,
+h2,
+h3 {
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+/* A visible, consistent focus ring — keyboard users are not second-class. */
+:focus-visible {
+  outline: 2px solid var(--protected);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

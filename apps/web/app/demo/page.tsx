@@ -35,7 +35,7 @@ export default function DemoPage() {
         </div>
         <Link
           href="/app/trade-lab"
-          className="w-fit shrink-0 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-semibold shadow-sm transition hover:border-protected lg:whitespace-nowrap"
+          className="w-fit shrink-0 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-semibold shadow-card transition hover:border-protected lg:whitespace-nowrap"
         >
           Make your own trade ↗
         </Link>

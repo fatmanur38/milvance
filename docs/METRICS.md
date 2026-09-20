@@ -132,24 +132,62 @@ Verification is a deliberate operation rather than something a page load
 triggers: the verdict is written down with a reason, and an unchecked leg simply
 supports no cycle. The failure mode is "counts nothing", never "counts wrongly".
 
-## Live figures at PKG-11
+## Live figures
 
-Read from the running stack against the deployed contract:
+Read from the running stack against the deployed contract. Re-read them rather
+than trusting this table — it is a snapshot, and the API is the source:
+
+```bash
+curl -s localhost:3001/api/metrics/public | jq '.protocolActivity, .localPayments, .northStar, .adoption'
+```
+
+### Protocol activity — includes our own demo wallets
+
+| Metric                         | Value |
+| ------------------------------ | ----- |
+| Orders created / completed     | 3 / 1 |
+| Milestones created / protected | 3 / 2 |
+| USDC protected                 | 20.00 |
+| USDC advanced to suppliers     | 8.00  |
+| USDC repaid to funders         | 9.00  |
+| USDC settled to suppliers      | 1.00  |
+| USDC refunded to buyers        | 10.00 |
+| Disputes opened / refunds      | 1 / 1 |
+| Distinct participating wallets | 5     |
+
+### Local-payment legs
+
+| Metric                               | Value    |
+| ------------------------------------ | -------- |
+| On-ramps reported (TRY → USDC)       | 2        |
+| Off-ramps reported (USDC → TRY)      | 1        |
+| Legs confirmed on Stellar            | 2        |
+| Legs that failed their Stellar check | 1        |
+| Legs not yet checked                 | 0        |
+| TRY onboarded                        | 2,000.00 |
+| TRY paid to suppliers                | 970.82   |
+
+### The two headline numbers
 
 | Metric                                     | Value |
 | ------------------------------------------ | ----- |
-| Orders created                             | 3     |
-| Milestones protected                       | 2     |
-| USDC protected                             | 20.00 |
-| USDC advanced to suppliers                 | 8.00  |
-| USDC repaid to funders                     | 9.00  |
-| USDC settled to suppliers                  | 1.00  |
-| USDC refunded to buyers                    | 10.00 |
-| Distinct participating wallets             | 5     |
-| Local-payment legs confirmed on Stellar    | 0     |
-| **Completed local-payment finance cycles** | **0** |
+| **Completed local-payment finance cycles** | **1** |
 | **External participating wallets**         | **0** |
 
-Both headline numbers are zero, and both are true. The cycle is one leg short: no
-supplier has converted an advance into TRY, and the single recorded on-ramp does
-not survive its Stellar check. No outside participant has taken part yet.
+**The cycle closed.** One milestone now satisfies all four conditions: the buyer
+protected it, an independent funder advanced their own USDC to the supplier, the
+contract settled it funder-first, and the supplier converted that money to TRY
+through the Anchor — with the Stellar leg confirmed by Horizon, not merely
+reported. It is a supplier off-ramp cycle; no buyer on-ramp cycle has completed,
+and the two are reported separately so one can never be read as the other.
+
+**External participation is still zero, and that is the honest number.** Five
+wallets have acted on the contract and none has declared itself outside the
+team. Participation is opt-in and self-declared, so no amount of our own demo
+activity can move this figure.
+
+**One reported leg still fails its Stellar check**, and is published as failing.
+It is the on-ramp described above: the report named a transaction that paid a
+different wallet the identical amount. It is stored as `MISMATCHED` with the
+reason and supports no metric. It is left in place deliberately — a metrics page
+that quietly drops its own bad data is not a metrics page.
