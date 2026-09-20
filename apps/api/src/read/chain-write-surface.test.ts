@@ -4,6 +4,7 @@ import { RequestMethod } from '@nestjs/common';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { describe, expect, it } from 'vitest';
 
+import { DemoController } from '../demo/demo.controller';
 import { HealthController } from '../health/health.controller';
 import { MetricsController } from '../metrics/metrics.controller';
 import { ReadController } from './read.controller';
@@ -62,5 +63,23 @@ describe('chain-derived write surface', () => {
     expect(paths).toContain('orders');
     expect(paths).toContain('milestones/:milestoneId/finance');
     expect(paths).toContain('funding/offers');
+  });
+
+  /**
+   * Trade Lab writes exactly one thing: a wallet's consent to be counted. Its
+   * controller is scoped to that resource, so a demo helper can never grow a
+   * route that reaches an order, a milestone or a payout.
+   */
+  it('confines the demo controller to participation consent', () => {
+    const controllerPath = Reflect.getMetadata(PATH_METADATA, DemoController) as string;
+    expect(controllerPath).toBe('demo/participants');
+
+    for (const route of routes(DemoController)) {
+      expect([RequestMethod.GET, RequestMethod.POST]).toContain(route.method);
+      // No chain vocabulary anywhere in its routing.
+      expect(`${controllerPath}/${route.path ?? ''}`).not.toMatch(
+        /order|milestone|funding|settle|refund|evidence/i,
+      );
+    }
   });
 });

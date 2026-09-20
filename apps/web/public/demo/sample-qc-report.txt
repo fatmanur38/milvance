@@ -1,0 +1,22 @@
+QUALITY CONTROL REPORT — SAMPLE
+
+This is a synthetic sample document shipped with Milvance so anyone trying the
+product has a file to submit as milestone evidence. It describes nothing real
+and contains no personal data.
+
+Order reference : demo
+Stage           : Production and QC
+Inspected       : 1 sample batch
+Result          : Passed
+Inspector       : Sample Inspector (not a real person)
+
+What happens to this file:
+
+  1. Your browser hashes the exact bytes with SHA-256.
+  2. The bytes are stored off-chain by the Milvance API.
+  3. Only the 32-byte fingerprint is written to Stellar, by your wallet.
+  4. The attestor compares the document they received against that fingerprint
+     and decides for themselves whether the milestone is complete.
+
+Stellar never sees this document and cannot inspect physical goods. A person
+attests; the contract enforces what follows.

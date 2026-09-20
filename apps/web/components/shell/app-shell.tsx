@@ -13,6 +13,7 @@ const NAV = [
   { href: '/app', label: 'Overview', exact: true },
   { href: '/app/orders', label: 'Orders' },
   { href: '/app/funding', label: 'Funding' },
+  { href: '/app/trade-lab', label: 'Trade Lab' },
   { href: '/app/anchor', label: 'Local payments' },
   { href: '/app/activity', label: 'Activity' },
 ] as const;

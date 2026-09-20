@@ -160,6 +160,7 @@ transaction; users continue to authorize financial actions in their wallets.
 - [Demo runbook](docs/DEMO_RUNBOOK.md) — _TBD_
 - [Product narrative](docs/PRODUCT_NARRATIVE.md) — _TBD_
 - [Product workspace](docs/PRODUCT_WORKSPACE.md)
+- [Trade Lab](docs/TRADE_LAB.md)
 - [Local payments (Anchor)](docs/ANCHOR_LOCAL_PAYMENTS.md)
 - [API read layer and indexer](docs/API_READ_LAYER.md)
 - [Architecture decision records](docs/adr/)

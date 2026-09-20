@@ -244,6 +244,20 @@ export const evidenceUploadSchema = z.object({
   anchoredOnChain: z.boolean(),
 });
 
+/**
+ * Consent metadata for a demo participant. Public-safe by construction: an
+ * address and two flags, never a name, a contact or a token.
+ */
+export const participantSchema = z.object({
+  walletAddress: account,
+  known: z.boolean().optional(),
+  consentToCount: z.boolean(),
+  isTeam: z.boolean(),
+  source: z.string().nullable().optional(),
+  firstSeenAt: z.string().optional(),
+  note: z.string().optional(),
+});
+
 export type Order = z.infer<typeof orderSchema>;
 export type Milestone = z.infer<typeof milestoneSchema>;
 export type OrderWithMilestones = z.infer<typeof orderWithMilestonesSchema>;
@@ -258,6 +272,7 @@ export type FunderOffer = z.infer<typeof funderOffersSchema>['offers'][number];
 export type Readiness = z.infer<typeof readinessSchema>;
 export type IndexerStatus = z.infer<typeof indexerStatusSchema>;
 export type ActivityItem = z.infer<typeof activitySchema>['activity'][number];
+export type Participant = z.infer<typeof participantSchema>;
 export type MilestoneStatus = (typeof MILESTONE_STATUSES)[number];
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 export type DerivedStatus = (typeof DERIVED_STATUSES)[number];

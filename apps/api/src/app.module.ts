@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { loadConfig, type ApiConfig } from './config';
+import { DemoController } from './demo/demo.controller';
 import { createEvidenceStorage, type EvidenceStorage } from './evidence/storage';
 import { EvidenceController } from './evidence/evidence.controller';
 import { HealthController } from './health/health.controller';
@@ -30,6 +31,7 @@ import { API_CONFIG, EVIDENCE_STORAGE } from './tokens';
     EvidenceController,
     LocalPaymentsController,
     MetricsController,
+    DemoController,
   ],
   providers: [
     { provide: API_CONFIG, useFactory: (): ApiConfig => loadConfig() },

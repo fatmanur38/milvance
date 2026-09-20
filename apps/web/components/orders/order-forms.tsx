@@ -26,11 +26,20 @@ export function partyProblem(
   return null;
 }
 
-export function CreateOrderForm() {
+export function CreateOrderForm({
+  initialParties,
+}: {
+  /**
+   * Suggested party addresses, e.g. the same three wallets as a previous demo
+   * trade. They are only initial values in the form: the buyer still reviews
+   * them and their wallet still signs, and the contract still decides.
+   */
+  initialParties?: { supplier: string; attestor: string; resolver: string };
+} = {}) {
   const tx = useContractTransaction();
-  const [supplier, setSupplier] = useState('');
-  const [attestor, setAttestor] = useState('');
-  const [resolver, setResolver] = useState('');
+  const [supplier, setSupplier] = useState(initialParties?.supplier ?? '');
+  const [attestor, setAttestor] = useState(initialParties?.attestor ?? '');
+  const [resolver, setResolver] = useState(initialParties?.resolver ?? '');
   const parties = {
     supplier: supplier.trim(),
     attestor: attestor.trim(),
@@ -92,9 +101,20 @@ export function CreateOrderForm() {
   );
 }
 
-export function CreateMilestoneForm({ order }: { order: OrderWithMilestones }) {
+export function CreateMilestoneForm({
+  order,
+  suggestion,
+}: {
+  order: OrderWithMilestones;
+  /**
+   * A template's suggested stage and amount. Wording and a prefilled number —
+   * the contract stores neither a stage name nor anything until the buyer
+   * signs this form.
+   */
+  suggestion?: { stage: string; amount: string; meaning: string } | undefined;
+}) {
   const tx = useContractTransaction();
-  const [amount, setAmount] = useState('');
+  const [amount, setAmount] = useState(suggestion?.amount ?? '');
   const [target, setTarget] = useState('');
   const parsed = parseUsdcInput(amount);
   const deadline =
@@ -118,10 +138,18 @@ export function CreateMilestoneForm({ order }: { order: OrderWithMilestones }) {
         )
       }
     >
-      <p className="text-sm text-muted">
-        Common stages: raw materials, production and QC, handover to the carrier, delivery. Stellar
-        treats every milestone the same way; the stage is for the people involved.
-      </p>
+      {suggestion === undefined ? (
+        <p className="text-sm text-muted">
+          Common stages: raw materials, production and QC, handover to the carrier, delivery.
+          Stellar treats every milestone the same way; the stage is for the people involved.
+        </p>
+      ) : (
+        <p className="text-sm text-muted">
+          <span className="font-medium text-foreground">{suggestion.stage}</span> —{' '}
+          {suggestion.meaning} The stage name stays between the people involved; Stellar records
+          only the amount, the optional date and the status.
+        </p>
+      )}
       <div className="flex flex-wrap gap-4">
         <Field
           label="Milestone payment (USDC)"

@@ -14,6 +14,7 @@ import {
   opportunitiesSchema,
   orderListSchema,
   orderWithMilestonesSchema,
+  participantSchema,
   positionsSchema,
   readinessSchema,
 } from './schemas';
@@ -40,6 +41,7 @@ export const queryKeys = {
   positions: (funder: string) => ['chain', 'funding', 'positions', funder] as const,
   activity: ['chain', 'activity'] as const,
   readiness: ['service', 'readiness'] as const,
+  participant: (address: string) => ['service', 'participant', address] as const,
   indexerStatus: ['service', 'indexer'] as const,
 };
 
@@ -63,6 +65,19 @@ export const api = {
   activity: () => apiRequest('/activity?limit=100', activitySchema),
   readiness: () => apiRequest('/health/ready', readinessSchema),
   indexerStatus: () => apiRequest('/indexer/status', indexerStatusSchema),
+  /** This wallet's own Trade Lab consent state. Consent metadata, never usage proof. */
+  participant: (address: string) =>
+    apiRequest(`/demo/participants/${enc(address)}`, participantSchema),
+  recordParticipant: (input: {
+    walletAddress: string;
+    consentToCount: boolean;
+    isTeam?: boolean;
+  }) =>
+    apiRequest('/demo/participants', participantSchema, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...input, source: 'trade-lab' }),
+    }),
   /**
    * Off-chain evidence metadata. The bytes are hashed and stored off-chain;
    * the digest this returns is what the supplier's WALLET later commits.
