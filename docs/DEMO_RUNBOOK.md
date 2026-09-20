@@ -3,6 +3,29 @@
 A five-minute demo, and everything needed to recover if something goes wrong
 in front of an audience.
 
+## For a judge with no wallet
+
+Send them to **`/demo`**. It needs nothing installed: a narrated walk through a
+trade that really happened, every step linked to its transaction on Stellar.
+
+It is not a simulation and cannot become one — each step is built from an
+indexed MilvanceCore event, and when the chain has no finished trade the page
+says so rather than inventing one. A judge who then wants to sign something
+connects Freighter and uses the same product the tour is describing.
+
+## Verifying a deployment before you demo
+
+```bash
+pnpm e2e                                    # against localhost
+WEB_URL=https://… API_URL=https://… pnpm e2e  # against the public deployment
+```
+
+76 read-only checks: health, every public page, the financed trade's economics
+(escrow split exactly, advance never exceeding protection, funder independent
+of the parties), the event order behind the tour, one settlement hash verified
+against Horizon, metric consistency, CORS, and that invites carry no authority.
+It signs nothing and writes nothing.
+
 ## Before you start
 
 | Check                                           | How                                   |

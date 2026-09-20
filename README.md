@@ -166,6 +166,8 @@ pnpm typecheck    # tsc --noEmit
 pnpm test         # Vitest
 pnpm build        # Next.js + tsc builds
 
+pnpm e2e          # happy path against a running deployment (read-only)
+
 pnpm contract:test     # cargo test
 pnpm contract:build    # stellar contract build (soroban-sdk 28 requires the CLI)
 pnpm verify            # everything above, in order

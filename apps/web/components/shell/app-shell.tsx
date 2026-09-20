@@ -10,6 +10,7 @@ import { WalletChip } from '../wallet/wallet-chip';
 import { ServiceBanner } from './service-banner';
 
 const NAV = [
+  { href: '/demo', label: 'Guided tour', exact: true },
   { href: '/app', label: 'Overview', exact: true },
   { href: '/app/orders', label: 'Orders' },
   { href: '/app/funding', label: 'Funding' },

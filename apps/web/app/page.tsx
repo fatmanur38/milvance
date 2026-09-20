@@ -8,6 +8,16 @@ export default function HomePage(): React.ReactElement {
 
       <p className="text-lg">Buyer funds the work, not the supplier.</p>
 
+      <a
+        className="w-fit rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-background"
+        href="/demo"
+      >
+        See a real trade, step by step →
+      </a>
+      <p className="-mt-3 text-xs opacity-70">
+        No wallet needed. Every step links to the transaction on Stellar Testnet.
+      </p>
+
       <p className="text-sm opacity-80">
         Milvance converts buyer-protected production milestones into financeable working capital and
         connects that capital to the local currency suppliers actually use.

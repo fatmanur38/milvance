@@ -4,6 +4,7 @@ import type { ReactElement } from 'react';
 
 import { queryKeys } from '@/lib/api/queries';
 import type {
+  ActivityItem,
   MilestoneEvidence,
   MilestoneFinance,
   OrderWithMilestones,
@@ -22,6 +23,9 @@ export function renderWithData(
     evidence?: Record<string, MilestoneEvidence>;
     orders?: { participant: string; orders: OrderWithMilestones[] };
     metrics?: PublicMetrics;
+    /** Every trade, unfiltered — what the public guided tour reads. */
+    allOrders?: OrderWithMilestones[];
+    activity?: ActivityItem[];
   } = {},
 ) {
   const client = new QueryClient({
@@ -40,6 +44,13 @@ export function renderWithData(
       count: seed.orders.orders.length,
     });
   }
+  if (seed.allOrders) {
+    client.setQueryData(queryKeys.allOrders, {
+      orders: seed.allOrders,
+      count: seed.allOrders.length,
+    });
+  }
+  if (seed.activity) client.setQueryData(queryKeys.activity, { activity: seed.activity });
   if (seed.metrics) client.setQueryData(queryKeys.publicMetrics, seed.metrics);
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
 }

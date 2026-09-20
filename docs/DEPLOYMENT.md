@@ -98,7 +98,7 @@ deployment can be added with a comma.
 From any machine, not just the one that deployed it:
 
 ```bash
-curl https://<api>/api/health/live       # process is up
+curl https://<api>/api/health            # process is up
 curl https://<api>/api/health/ready      # database reachable, indexer current
 curl https://<api>/api/metrics/public    # read models answering
 curl -I https://<web>/app                # web app serving

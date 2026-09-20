@@ -25,7 +25,7 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     plan: starter
-    healthCheckPath: /api/health/live
+    healthCheckPath: /api/health
     # Migrations run before the new process serves traffic. `migrate deploy`
     # only applies pending migrations — it never resets or drops anything.
     preDeployCommand: pnpm --filter @milvance/api db:migrate

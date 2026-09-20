@@ -23,7 +23,8 @@
     "deploy:testnet": "node scripts/deploy-testnet/deploy.mjs",
     "bindings:generate": "node scripts/deploy-testnet/generate-bindings.mjs",
     "smoke:testnet": "node scripts/deploy-testnet/smoke.mjs",
-    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm contract:fmt && pnpm contract:clippy && pnpm contract:test"
+    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm contract:fmt && pnpm contract:clippy && pnpm contract:test",
+    "e2e": "node scripts/e2e/happy-path.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

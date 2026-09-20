@@ -32,6 +32,7 @@ import type { LocalPaymentLeg } from '../anchor/record';
 export const queryKeys = {
   chain: ['chain'] as const,
   orders: (participant: string) => ['chain', 'orders', participant] as const,
+  allOrders: ['chain', 'orders', 'all'] as const,
   order: (orderId: string) => ['chain', 'order', orderId] as const,
   milestoneFinance: (milestoneId: string) =>
     ['chain', 'milestone', milestoneId, 'finance'] as const,
@@ -54,6 +55,8 @@ const enc = encodeURIComponent;
 export const api = {
   orders: (participant: string) =>
     apiRequest(`/orders?participant=${enc(participant)}&limit=200`, orderListSchema),
+  /** Every trade on the contract, unfiltered. Public chain state, not a workspace. */
+  allOrders: () => apiRequest('/orders?limit=200', orderListSchema),
   order: (orderId: string) => apiRequest(`/orders/${enc(orderId)}`, orderWithMilestonesSchema),
   milestoneFinance: (id: string) =>
     apiRequest(`/milestones/${enc(id)}/finance`, milestoneFinanceSchema),
@@ -122,6 +125,16 @@ export function useOrders(participant: string | undefined) {
     queryFn: () => api.orders(participant as string),
     enabled: participant !== undefined,
   });
+}
+
+/**
+ * Every trade, with no participant filter.
+ *
+ * Used by the guided tour, which narrates public history rather than anyone's
+ * own workspace — so it must work with no wallet connected at all.
+ */
+export function useAllOrders() {
+  return useQuery({ queryKey: queryKeys.allOrders, queryFn: api.allOrders });
 }
 
 export function useOrder(orderId: string) {
