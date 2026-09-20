@@ -42,6 +42,17 @@ export interface TourStep {
   readonly at: string;
   /** The point a judge should take away. Omitted where there is nothing to add. */
   readonly lesson?: string;
+  /**
+   * How settled escrow was split, when this step settled one.
+   *
+   * Carried separately because settlement is the only step where a single
+   * transaction moves money to two parties at once, and the picture has to
+   * show both arrows leaving together.
+   */
+  readonly settlement?: {
+    readonly funderRepayment: string;
+    readonly supplierPayout: string;
+  };
 }
 
 interface EventFields {
@@ -198,6 +209,10 @@ function narrate(item: ActivityItem): Omit<TourStep, 'id' | 'txHash' | 'ledger' 
         amountMeans: 'repaid',
         lesson:
           'The funder’s advance is not paid again here. They advanced their own money earlier and are now made whole out of escrow.',
+        settlement: {
+          funderRepayment: text(f.funder_repayment) ?? '0',
+          supplierPayout: text(f.supplier_payout) ?? '0',
+        },
       };
     case 'dispute_opened':
       return {

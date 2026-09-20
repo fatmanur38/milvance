@@ -85,6 +85,7 @@ export function LocalPaymentsPanel({
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [transfer, setTransfer] = useState<AnchorTransaction | null>(null);
   const [simulationSubmitted, setSimulationSubmitted] = useState(false);
+  const [referenceInput, setReferenceInput] = useState('');
   const [paymentHash, setPaymentHash] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -267,6 +268,31 @@ export function LocalPaymentsPanel({
       }
     });
 
+  const resumeTransfer = () =>
+    run('Checking transfer', async () => {
+      const session = activeSession();
+      if (!capabilities || !session) throw new Error('Sign in to the provider first.');
+      const id = referenceInput.trim();
+      if (!/^[a-zA-Z0-9._:-]{1,120}$/.test(id)) {
+        throw new Error('Enter the provider reference shown on your transfer.');
+      }
+      const found = await anchorProvider.getTransaction(id, session, capabilities);
+      setTransfer(found);
+      setDirection(found.kind === 'deposit' ? 'deposit' : 'withdraw');
+      setQuote(null);
+      setPaymentHash(null);
+      setRecorded(null);
+      // We cannot know whether a previous tab already sent the bank simulation.
+      // A resumed transfer is read-only so it cannot accidentally be credited twice.
+      setSimulationSubmitted(true);
+      if (found.status === 'completed') {
+        if (found.kind === 'deposit' && address !== null) {
+          await recordLeg(found, 'deposit', address, null, null);
+        }
+        await controller.refresh();
+      }
+    });
+
   const startWithdraw = () =>
     run('Starting cash-out', async () => {
       const session = activeSession();
@@ -313,6 +339,7 @@ export function LocalPaymentsPanel({
     setQuote(null);
     setTransfer(null);
     setSimulationSubmitted(false);
+    setReferenceInput('');
     setPaymentHash(null);
     setRecorded(null);
   };
@@ -419,6 +446,34 @@ export function LocalPaymentsPanel({
 
       {sessionLive && (
         <section className="flex flex-col gap-4 rounded-lg border border-current/15 p-4">
+          <details className="text-sm">
+            <summary className="cursor-pointer">Check an existing transfer</summary>
+            <form
+              className="mt-3 flex flex-wrap items-end gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void resumeTransfer();
+              }}
+            >
+              <label className="flex flex-col gap-1">
+                <span className="text-xs opacity-70">Provider reference</span>
+                <input
+                  value={referenceInput}
+                  onChange={(event) => setReferenceInput(event.target.value)}
+                  placeholder="sep_…"
+                  autoComplete="off"
+                  className="rounded border border-current/25 bg-transparent px-3 py-2"
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={busy !== null}
+                className="rounded border border-current/30 px-3 py-2 disabled:opacity-50"
+              >
+                Check transfer
+              </button>
+            </form>
+          </details>
           <div className="flex gap-2 text-sm">
             {(['deposit', 'withdraw'] as const).map((value) => (
               <button

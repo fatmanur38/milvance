@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { screen, within } from '@testing-library/react';
+import { fireEvent, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import type { ActivityItem } from '@/lib/api/schemas';
@@ -59,7 +59,51 @@ describe('the tour a judge sees', () => {
     // Rendered without a wallet provider mock: connecting one is not a
     // prerequisite for understanding the product.
     show();
-    expect(screen.getAllByTestId('tour-step').length).toBe(5);
+    expect(screen.getByTestId('tour-step')).toBeTruthy();
+  });
+
+  it('leads with the animation, not with paragraphs', () => {
+    show();
+    // Four parties on the stage, and one step's words — not twelve.
+    for (const party of ['buyer', 'escrow', 'supplier', 'funder']) {
+      expect(screen.getByTestId(`flow-node-${party}`)).toBeTruthy();
+    }
+    expect(screen.getAllByTestId('tour-step')).toHaveLength(1);
+  });
+
+  it('lets a reader scrub the timeline instead of scrolling', () => {
+    show();
+    const timeline = screen.getByRole('list', { name: /Trade timeline/i });
+    const marks = within(timeline).getAllByRole('button');
+    expect(marks).toHaveLength(5);
+
+    fireEvent.click(marks[2]!);
+    // Step 3 is the advance: the funder's own money, going straight across.
+    const coin = screen.getByTestId('flow-coin');
+    expect(coin.getAttribute('data-amount')).toBe('80000000');
+    expect(screen.getByTestId('tour-step').textContent).toMatch(/funder pays the supplier/i);
+  });
+
+  it('shows the advance leaving the funder, not the escrow', () => {
+    show();
+    fireEvent.click(
+      within(screen.getByRole('list', { name: /Trade timeline/i })).getAllByRole('button')[2]!,
+    );
+    const escrow = screen.getByTestId('flow-node-escrow');
+    // Escrow still holds the full protected amount while the advance moves.
+    expect(escrow.textContent).toContain('10.00');
+  });
+
+  it('moves two amounts at once when the contract settles', () => {
+    show();
+    fireEvent.click(
+      within(screen.getByRole('list', { name: /Trade timeline/i })).getAllByRole('button')[4]!,
+    );
+    const coins = screen
+      .getAllByTestId('flow-coin')
+      .map((coin) => coin.getAttribute('data-amount'));
+    // One transaction, two destinations: 9 to the funder, 1 to the supplier.
+    expect(coins).toEqual(['90000000', '10000000']);
   });
 
   it('says up front that it is real history, not a simulation', () => {
@@ -68,33 +112,32 @@ describe('the tour a judge sees', () => {
     expect(screen.getByText(/you are reading the ledger/i)).toBeTruthy();
   });
 
-  it('links every step to the transaction that produced it', () => {
+  it('links the step it is showing to the transaction that produced it', () => {
     const { container } = show();
     const links = [...container.querySelectorAll('a[href*="stellar.expert"]')];
-    expect(links.length).toBe(5);
-    for (const link of links) {
-      expect(link.getAttribute('href')).toMatch(/\/tx\/[0-9a-f]{64}$/);
-    }
+    expect(links.length).toBe(1);
+    expect(links[0]?.getAttribute('href')).toMatch(/\/tx\/[0-9a-f]{64}$/);
   });
 
-  it('shows who signed each step, by role rather than by address', () => {
+  it('keeps every transaction reachable, one disclosure away', () => {
+    show();
+    const list = screen.getByText(/All 5 transactions/i);
+    expect(list).toBeTruthy();
+  });
+
+  it('shows who signed the step, by role rather than by address', () => {
     const { container } = show();
-    expect(screen.getAllByText(/Buyer signed this/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Funder signed this/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Buyer signed this/)).toBeTruthy();
     // A tour is not a directory of wallet addresses.
     expect(container.textContent).not.toMatch(/G[A-Z2-7]{55}/);
   });
 
   it('never merges buyer escrow with the funder advance', () => {
     const { container } = show();
-    // Protected once, released once — both 10.00, and neither is the advance.
-    expect(screen.getAllByText('10.00 USDC').length).toBe(2);
-    expect(screen.getByText('8.00 USDC')).toBeTruthy();
-    expect(container.textContent).not.toMatch(/18\.00 USDC/);
-    const advance = screen.getAllByTestId('tour-step')[2];
-    expect(
-      within(advance!).getByText(/advanced by the funder, from their own money/i),
-    ).toBeTruthy();
+    // 10 protected + 8 advanced must never be drawn or written as 18.
+    expect(container.textContent).not.toMatch(/18\.00/);
+    expect(screen.getByText(/Buyer’s protected payment/)).toBeTruthy();
+    expect(screen.getByText(/Funder’s own capital/)).toBeTruthy();
   });
 
   it('offers the real product as the next step, not a sandbox', () => {

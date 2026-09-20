@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useState } from 'react';
 
 import { describeApiError } from '@/lib/api/client';
 import { useActivity, useAllOrders } from '@/lib/api/queries';
@@ -8,6 +9,7 @@ import { buildTour, pickTourOrder, tourIsTellable, type TourStep } from '@/lib/d
 import { formatUsdcUnits } from '@/lib/domain/amounts';
 import { testnetDeployment } from '@/lib/wallet/config';
 import { Badge, Button, Card, ExplorerLink, Loading, Notice } from '../ui/primitives';
+import { TradeFlow } from './trade-flow';
 
 /**
  * The guided tour: what a judge sees when they have four minutes and no wallet.
@@ -21,6 +23,7 @@ export function GuidedTour() {
   // No participant filter: the tour is public history, not anyone's workspace.
   const orders = useAllOrders();
   const activity = useActivity();
+  const [index, setIndex] = useState(0);
 
   if (orders.isPending || activity.isPending) {
     return <Loading label="Reading the trade from Stellar…" />;
@@ -65,36 +68,51 @@ export function GuidedTour() {
     );
   }
 
+  const step = steps[Math.min(index, steps.length - 1)];
+
   return (
     <div className="flex flex-col gap-6">
+      {/* The animation first. The distinction it shows is the product. */}
+      <TradeFlow steps={steps} index={Math.min(index, steps.length - 1)} onIndexChange={setIndex} />
+
+      {step !== undefined && (
+        <StepDetail step={step} number={Math.min(index, steps.length - 1) + 1} />
+      )}
+
+      <details className="rounded-xl border border-border p-4">
+        <summary className="cursor-pointer text-sm font-medium">
+          All {steps.length} transactions of trade #{order.orderId}
+        </summary>
+        <ol className="mt-3 flex flex-col gap-1">
+          {steps.map((candidate, position) => (
+            <li key={candidate.id}>
+              <button
+                type="button"
+                onClick={() => setIndex(position)}
+                aria-current={position === index}
+                className={`flex w-full flex-wrap items-baseline gap-2 rounded-lg px-2 py-1.5 text-left text-sm ${
+                  position === index ? 'bg-foreground/[0.06]' : 'hover:bg-foreground/[0.03]'
+                }`}
+              >
+                <span className="w-5 shrink-0 tabular-nums text-xs text-muted">{position + 1}</span>
+                <span className="font-medium">{candidate.title}</span>
+                {candidate.amount !== null && (
+                  <span className="tabular-nums text-xs text-muted">
+                    {formatUsdcUnits(candidate.amount)} USDC
+                  </span>
+                )}
+              </button>
+            </li>
+          ))}
+        </ol>
+      </details>
+
       <Notice tone="attention" title="This is real history, not a simulation">
-        Every step below happened on Stellar Testnet, signed by a wallet, and is linked to the
-        transaction that produced it. Nothing here is scripted, and there is no mode that makes it
-        up — if you follow a link, you are reading the ledger.
+        Every step happened on Stellar Testnet, signed by a wallet, and links to the transaction
+        that produced it. Nothing is scripted, and there is no mode that makes it up — follow a link
+        and you are reading the ledger. Contract{' '}
+        <span className="font-mono text-xs">{short(testnetDeployment.contractId)}</span>.
       </Notice>
-
-      <Card className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-lg font-semibold">Trade #{order.orderId}</h2>
-          <span className="text-xs text-muted">
-            {steps.length} transactions · contract{' '}
-            <span className="font-mono">{short(testnetDeployment.contractId)}</span>
-          </span>
-        </div>
-        <p className="text-sm text-muted">
-          A buyer protects a milestone payment. A funder advances working capital against it. The
-          contract repays the funder first when the work is verified. One stage was disputed and
-          refunded, which is included on purpose — the honest path matters more than the happy one.
-        </p>
-      </Card>
-
-      <ol className="flex flex-col gap-4">
-        {steps.map((step, index) => (
-          <li key={step.id}>
-            <Step step={step} number={index + 1} />
-          </li>
-        ))}
-      </ol>
 
       <Card className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold">Want to make history instead of reading it?</h2>
@@ -131,16 +149,13 @@ const THEME_LABELS: Record<TourStep['theme'], string> = {
   dispute: 'Dispute',
 };
 
-/** How to read a step's amount, so the two pools never blur into one figure. */
-const AMOUNT_LABELS: Record<NonNullable<TourStep['amountMeans']>, string> = {
-  protected: 'protected by the buyer',
-  advanced: 'advanced by the funder, from their own money',
-  repaid: 'released from escrow',
-  'paid-out': 'paid to the supplier',
-  refunded: 'returned to the buyer',
-};
-
-function Step({ step, number }: { step: TourStep; number: number }) {
+/**
+ * The active step's words, alongside the frame the animation is showing.
+ *
+ * Only one at a time. The full list is a disclosure below, because a reader
+ * who wanted to read twelve paragraphs would not have needed the picture.
+ */
+function StepDetail({ step, number }: { step: TourStep; number: number }) {
   return (
     <Card className="flex flex-col gap-3" data-testid="tour-step">
       <div className="flex flex-wrap items-center gap-2">
@@ -153,17 +168,6 @@ function Step({ step, number }: { step: TourStep; number: number }) {
       </div>
 
       <p className="text-sm">{step.detail}</p>
-
-      {step.amount !== null && (
-        <p className="text-sm">
-          <span className="text-xl font-semibold tabular-nums">
-            {formatUsdcUnits(step.amount)} USDC
-          </span>
-          {step.amountMeans !== null && (
-            <span className="text-muted"> — {AMOUNT_LABELS[step.amountMeans]}</span>
-          )}
-        </p>
-      )}
 
       {step.lesson !== undefined && (
         <p className="rounded-lg border border-border bg-foreground/[0.03] p-3 text-sm">

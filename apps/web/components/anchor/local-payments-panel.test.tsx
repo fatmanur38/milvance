@@ -104,4 +104,21 @@ describe('sandbox bank simulation', () => {
     );
     expect(fixture.simulateBankTransfer).toHaveBeenCalledTimes(1);
   });
+
+  it('looks up a previous transfer without sending the bank simulation again', async () => {
+    render(<LocalPaymentsPanel />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Sign in to the local-payment provider' }),
+    );
+    fireEvent.click(await screen.findByText('Check an existing transfer'));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Provider reference' }), {
+      target: { value: fixture.pending.id },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Check transfer' }));
+
+    await screen.findByText(/The provider is processing this transfer/);
+    expect(fixture.getTransaction).toHaveBeenCalledWith(fixture.pending.id, fixture.session, {});
+    expect(fixture.simulateBankTransfer).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Simulate the bank transfer' })).toBeNull();
+  });
 });
