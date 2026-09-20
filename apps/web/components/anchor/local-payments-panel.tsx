@@ -84,6 +84,7 @@ export function LocalPaymentsPanel({
   const [quote, setQuote] = useState<AnchorQuote | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [transfer, setTransfer] = useState<AnchorTransaction | null>(null);
+  const [simulationSubmitted, setSimulationSubmitted] = useState(false);
   const [paymentHash, setPaymentHash] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -199,6 +200,7 @@ export function LocalPaymentsPanel({
         }),
       );
       setTransfer(null);
+      setSimulationSubmitted(false);
       setPaymentHash(null);
     });
 
@@ -220,28 +222,49 @@ export function LocalPaymentsPanel({
           sourceAsset: TRY_ASSET,
         }),
       );
+      setSimulationSubmitted(false);
     });
 
   const simulateBank = () =>
     run('Simulating bank transfer', async () => {
       const session = activeSession();
       if (!capabilities || !session || !transfer) throw new Error('Start a deposit first.');
+      // A network failure can occur after the provider accepts the POST. Treat
+      // an uncertain response as submitted until its transaction is checked.
+      setSimulationSubmitted(true);
       await mockAnchorDriver.simulateBankTransfer({
         capabilities,
         session,
         transactionId: transfer.id,
         amount,
       });
+      setBusy('Checking provider status');
       const finished = await pollTransfer(
         (id, s, c) => anchorProvider.getTransaction(id, s, c),
         transfer.id,
         session,
         capabilities,
-        { onUpdate: setTransfer },
+        { onUpdate: setTransfer, maxAttempts: 10 },
       );
       setTransfer(finished);
-      if (address !== null) await recordLeg(finished, 'deposit', address, null, null);
-      await controller.refresh();
+      if (finished.status === 'completed') {
+        if (address !== null) await recordLeg(finished, 'deposit', address, null, null);
+        await controller.refresh();
+      }
+    });
+
+  const refreshDeposit = () =>
+    run('Checking provider status', async () => {
+      const session = activeSession();
+      if (!capabilities || !session || !transfer || transfer.kind !== 'deposit') {
+        throw new Error('Start a deposit first.');
+      }
+      const latest = await anchorProvider.getTransaction(transfer.id, session, capabilities);
+      setTransfer(latest);
+      if (latest.status === 'completed') {
+        if (address !== null) await recordLeg(latest, 'deposit', address, null, null);
+        await controller.refresh();
+      }
     });
 
   const startWithdraw = () =>
@@ -289,6 +312,7 @@ export function LocalPaymentsPanel({
     setCustomer(null);
     setQuote(null);
     setTransfer(null);
+    setSimulationSubmitted(false);
     setPaymentHash(null);
     setRecorded(null);
   };
@@ -457,7 +481,9 @@ export function LocalPaymentsPanel({
               </div>
               {quote.feeTotal && <div className="opacity-70">Fee {quote.feeTotal}</div>}
               <div className={quoteExpired ? 'text-xs' : 'text-xs opacity-70'}>
-                {quoteExpired ? 'Rate expired — get a new one.' : `Rate held for ${secondsLeft}s`}
+                {quoteExpired
+                  ? 'Rate expired — get a new one.'
+                  : `Rate valid for ${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, '0')} more — continue now.`}
               </div>
             </div>
           )}
@@ -551,23 +577,45 @@ export function LocalPaymentsPanel({
           )}
 
           {/* Development infrastructure, clearly fenced off from the product. */}
-          {mockAnchorEnabled && transfer.kind === 'deposit' && !isFinished(transfer) && (
-            <div className="rounded border border-dashed border-current/40 p-3">
-              <div className="text-xs font-medium uppercase tracking-wide opacity-70">
-                Sandbox tool — not a real bank transfer
+          {mockAnchorEnabled &&
+            transfer.kind === 'deposit' &&
+            transfer.status === 'pending_user_transfer_start' &&
+            !simulationSubmitted && (
+              <div className="rounded border border-dashed border-current/40 p-3">
+                <div className="text-xs font-medium uppercase tracking-wide opacity-70">
+                  Sandbox tool — not a real bank transfer
+                </div>
+                <p className="mt-1 text-xs opacity-70">
+                  A production provider learns the {anchorConfig.localCurrency} arrived from its
+                  bank integration. This sandbox needs someone to say so. No real money moves; the
+                  Stellar leg it triggers is real Testnet USDC.
+                </p>
+                <button
+                  type="button"
+                  onClick={simulateBank}
+                  disabled={busy !== null}
+                  className="mt-2 rounded border border-current/30 px-3 py-1 text-xs disabled:opacity-50"
+                >
+                  {busy ?? 'Simulate the bank transfer'}
+                </button>
               </div>
-              <p className="mt-1 text-xs opacity-70">
-                A production provider learns the {anchorConfig.localCurrency} arrived from its bank
-                integration. This sandbox needs someone to say so. No real money moves; the Stellar
-                leg it triggers is real Testnet USDC.
-              </p>
+            )}
+          {transfer.kind === 'deposit' && !isFinished(transfer) && (
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              <span>
+                {transfer.status !== 'pending_user_transfer_start'
+                  ? 'The provider is processing this transfer. Check its status; do not simulate the same bank transfer again.'
+                  : simulationSubmitted
+                    ? 'The simulation request may have reached the provider. Check its status before starting another transfer.'
+                    : 'After sending the bank transfer, check its status here.'}
+              </span>
               <button
                 type="button"
-                onClick={simulateBank}
+                onClick={refreshDeposit}
                 disabled={busy !== null}
-                className="mt-2 rounded border border-current/30 px-3 py-1 text-xs disabled:opacity-50"
+                className="rounded border border-current/30 px-3 py-1 disabled:opacity-50"
               >
-                {busy ?? 'Simulate the bank transfer'}
+                Check transfer status
               </button>
             </div>
           )}
