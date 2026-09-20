@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { allowedOrigins } from './main';
+import { allowedOrigins } from './http-security';
 
 /**
  * Which browser origins may call the API.
