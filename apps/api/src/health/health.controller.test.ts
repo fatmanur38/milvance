@@ -1,3 +1,4 @@
+import { PATH_METADATA } from '@nestjs/common/constants';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ApiConfig } from '../config';
@@ -13,6 +14,14 @@ const config = {
 } as ApiConfig;
 
 describe('health and readiness', () => {
+  it('answers liveness on both paths a platform health check might use', () => {
+    // A blueprint pointing at a path that does not exist marks every deploy
+    // unhealthy and rolls it back — found the hard way, pinned here.
+    const paths: unknown = Reflect.getMetadata(PATH_METADATA, HealthController.prototype.health);
+    expect(paths).toContain('health');
+    expect(paths).toContain('health/live');
+  });
+
   it('keeps liveness separate from database and RPC availability', async () => {
     const fixtureDsn = ['postgresql://', 'user:', 'example-only', '@host/db'].join('');
     const prisma = {

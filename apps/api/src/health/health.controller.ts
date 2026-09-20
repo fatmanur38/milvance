@@ -29,8 +29,14 @@ export class HealthController {
     @Inject(API_CONFIG) private readonly config: ApiConfig,
   ) {}
 
-  /** Liveness: is this process up at all? */
-  @Get('health')
+  /**
+   * Liveness: is this process up at all?
+   *
+   * Two paths because platform health checks differ on where they expect to
+   * find it, and a blueprint pointing at a path that does not exist marks
+   * every deploy unhealthy and rolls it back.
+   */
+  @Get(['health', 'health/live'])
   health() {
     return {
       status: 'ok',

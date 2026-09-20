@@ -251,6 +251,58 @@ describe('waiting for the read model', () => {
     expect(outcome).toBe('delayed');
   });
 
+  it('asks a scheduled indexer to run now, without telling it what to index', async () => {
+    // With no always-on worker, the next run could otherwise be a minute away.
+    const c = clock();
+    const nudges: unknown[][] = [];
+    const reads = ['100', '105'];
+
+    const outcome = await waitForIndexer(
+      105,
+      async () => ({ scannedThroughLedger: reads.shift() ?? '105' }),
+      {
+        ...c,
+        nudge: async (...args: unknown[]) => {
+          nudges.push(args);
+        },
+      },
+    );
+
+    expect(outcome).toBe('synced');
+    expect(nudges.length).toBeGreaterThan(0);
+    // The ledger is never passed along: the service indexes what the chain has,
+    // not what this browser would like it to have.
+    expect(nudges.every((args) => args.length === 0)).toBe(true);
+  });
+
+  it('nudges far less often than it polls', async () => {
+    const c = clock();
+    let nudged = 0;
+    await waitForIndexer(200, async () => ({ scannedThroughLedger: '100' }), {
+      ...c,
+      timeoutMs: 20_000,
+      intervalMs: 1_000,
+      nudgeIntervalMs: 10_000,
+      nudge: async () => {
+        nudged += 1;
+      },
+    });
+    // Twenty polls, three nudges at most: a read is cheap, a tick is not.
+    expect(nudged).toBeLessThanOrEqual(3);
+  });
+
+  it('treats a failed nudge as slower, never as unsynced', async () => {
+    const c = clock();
+    const outcome = await waitForIndexer(5, async () => ({ scannedThroughLedger: '5' }), {
+      ...c,
+      nudge: async () => {
+        throw new Error('nudge endpoint unavailable');
+      },
+    });
+    // The transaction is already final on chain; only the workspace was late.
+    expect(outcome).toBe('synced');
+  });
+
   it('keeps waiting through API errors', async () => {
     let calls = 0;
     const c = clock();

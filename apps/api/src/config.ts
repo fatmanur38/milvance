@@ -32,6 +32,30 @@ export interface IndexerConfig {
   readonly startLedger: bigint;
   /** Seconds between polls when running as a worker. */
   readonly pollIntervalSeconds: number;
+  /**
+   * Shared secret an external scheduler presents to run one indexer tick.
+   *
+   * Undefined disables the scheduled-tick endpoint entirely. That is the safe
+   * default: an unauthenticated endpoint is never the fallback for a missing
+   * secret. Server-side only — never a `NEXT_PUBLIC_*` value, never logged.
+   */
+  readonly cronSecret: string | undefined;
+  /** Work limits for one bounded tick. See `IndexerService.tick`. */
+  readonly tick: IndexerTickLimits;
+}
+
+/**
+ * How much one tick may do before it stops and reports `caughtUp: false`.
+ *
+ * A tick runs inside an HTTP request, so it must end on its own terms rather
+ * than when a proxy gives up. Stopping early is never data loss: the cursor
+ * only ever advances over events that were stored, so the next tick resumes
+ * exactly where this one stopped.
+ */
+export interface IndexerTickLimits {
+  readonly maxPages: number;
+  readonly maxEvents: number;
+  readonly maxSeconds: number;
 }
 
 /**
@@ -127,6 +151,27 @@ function parseInteger(value: string | undefined, fallback: number, key: string):
   return parsed;
 }
 
+/**
+ * Refuse a scheduler secret that is too short to be worth having.
+ *
+ * A weak shared secret on an endpoint that writes to the read model is worse
+ * than an obviously absent one, because it looks protected. The value itself is
+ * never echoed, not even its length.
+ */
+const MIN_CRON_SECRET_LENGTH = 32;
+
+function assertStrongSecret(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value.length < MIN_CRON_SECRET_LENGTH) {
+    throw new ConfigError(
+      `INDEXER_CRON_SECRET must be at least ${MIN_CRON_SECRET_LENGTH} characters`,
+    );
+  }
+  return value;
+}
+
 /** A Stellar contract id: 56 characters starting with `C`. */
 function assertContractId(value: string, key: string): string {
   if (!/^C[A-Z2-7]{55}$/.test(value)) {
@@ -182,6 +227,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
         'INDEXER_START_LEDGER',
       ),
       pollIntervalSeconds: parseInteger(env.INDEXER_POLL_SECONDS, 10, 'INDEXER_POLL_SECONDS'),
+      cronSecret: assertStrongSecret(optional(env, 'INDEXER_CRON_SECRET')),
+      tick: {
+        maxPages: parseInteger(env.INDEXER_TICK_MAX_PAGES, 5, 'INDEXER_TICK_MAX_PAGES'),
+        maxEvents: parseInteger(env.INDEXER_TICK_MAX_EVENTS, 500, 'INDEXER_TICK_MAX_EVENTS'),
+        maxSeconds: parseInteger(env.INDEXER_TICK_MAX_SECONDS, 20, 'INDEXER_TICK_MAX_SECONDS'),
+      },
     },
     evidence: {
       driver,

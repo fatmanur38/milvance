@@ -66,6 +66,12 @@ async function main() {
   section('Service health');
   const live = await getJson(`${API}/api/health`);
   check('API is live', live.status === 'ok', JSON.stringify(live.status));
+  // The path a deployment blueprint health-checks. If it 404s, every deploy is
+  // marked unhealthy and rolled back — which has happened here before.
+  check(
+    'liveness answers on the path the blueprint checks',
+    (await status(`${API}/api/health/live`)) === 200,
+  );
 
   const ready = await getJson(`${API}/api/health/ready`);
   check('API is ready', ready.status === 'ok' || ready.status === 'degraded', ready.status);
@@ -287,6 +293,34 @@ async function main() {
     'responses declare a content-type policy',
     cors.headers.get('x-content-type-options') === 'nosniff',
   );
+  // The one HTTP route that writes to the read model. Unauthenticated it must
+  // refuse (401), or be switched off entirely (503) — never run.
+  const tickUnauthenticated = await status(`${API}/api/internal/indexer/tick`, { method: 'POST' });
+  check(
+    'the scheduled indexer tick refuses an unauthenticated caller',
+    tickUnauthenticated === 401 || tickUnauthenticated === 503,
+    String(tickUnauthenticated),
+  );
+  const tickGuessed = await status(`${API}/api/internal/indexer/tick`, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer not-the-secret' },
+  });
+  check(
+    'the scheduled indexer tick refuses a guessed secret',
+    tickGuessed === 401 || tickGuessed === 503,
+    String(tickGuessed),
+  );
+  const injected = await status(`${API}/api/internal/indexer/tick`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer not-the-secret' },
+    body: JSON.stringify({ fromLedger: 1, events: [{ eventName: 'milestone_settled' }] }),
+  });
+  check(
+    'events supplied by a caller are refused, not indexed',
+    injected === 401 || injected === 503,
+    String(injected),
+  );
+
   const payload = JSON.stringify(metrics);
   for (const forbidden of ['jwt', 'secret', 'seed', 'iban', 'kyc', 'password', 'privateKey']) {
     check(

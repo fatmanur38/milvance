@@ -120,6 +120,13 @@ model IndexerCursor {
   /// Redacted, operator-facing failure summary. Never a token or a secret.
   lastError String?
 
+  /// Holder of the current tick lease — a random per-run id, never a hostname,
+  /// a credential or anything that identifies a person.
+  tickLeaseOwner String?
+  /// When the current tick lease expires. A process that dies mid-tick cannot
+  /// wedge the stream: the lease simply runs out and the next tick takes it.
+  tickLeaseUntil DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
