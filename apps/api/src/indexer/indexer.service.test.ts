@@ -310,6 +310,24 @@ suite('indexer', () => {
     expect(status.lastError).toMatch(/history is outside RPC retention/);
   });
 
+  it('creates one cursor row when two workers start on an empty stream at once', async () => {
+    // The only window outside the `FOR UPDATE` lock: before the cursor row
+    // exists there is nothing to lock, so the insert itself must be the thing
+    // that resolves the race. A scheduler that fires while the previous tick is
+    // still starting hits this on every fresh database.
+    const workers = Array.from(
+      { length: 4 },
+      () => new IndexerService(prisma, config(), fakeRpc([])),
+    );
+
+    const cursors = await Promise.all(workers.map((worker) => worker.ensureCursor()));
+
+    expect(await raw.indexerCursor.count()).toBe(1);
+    // Every worker must be looking at the same row, not at four private ones.
+    expect(new Set(cursors.map((cursor) => cursor.id)).size).toBe(1);
+    expect(cursors[0]?.startLedger).toBe(4_760_000n);
+  });
+
   it('serializes two workers that fetch the same page and keeps one projection', async () => {
     const event = rawEvent('order_created', { order_id: 1n, ...ORDER_FIELDS });
     const { decodeEvent } = await import('./decoder');

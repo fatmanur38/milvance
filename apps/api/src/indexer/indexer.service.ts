@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { Injectable, Logger } from '@nestjs/common';
 
 import type { Prisma } from '../generated/prisma/client';
@@ -93,13 +95,28 @@ export class IndexerService {
     this.ctx = { network: config.stellar.network, contractId: config.stellar.contractId };
   }
 
-  /** Create the cursor row for this stream if it does not exist yet. */
+  /**
+   * Create the cursor row for this stream if it does not exist yet.
+   *
+   * Written as a single `ON CONFLICT DO NOTHING` because this is the one
+   * moment two workers can race outside the `FOR UPDATE` lock: before the row
+   * exists there is nothing to lock. A Prisma `upsert` cannot be used here —
+   * with an empty `update` it has no `SET` clause to offer PostgreSQL, so it
+   * degrades to a read followed by an insert, and both workers read "absent".
+   */
   async ensureCursor() {
-    return this.prisma.indexerCursor.upsert({
-      where: { cursor_stream: this.ctx },
-      create: { ...this.ctx, startLedger: this.config.indexer.startLedger },
-      update: {},
-    });
+    await this.prisma.$executeRaw`
+      INSERT INTO "IndexerCursor" ("id", "network", "contractId", "startLedger", "updatedAt")
+      VALUES (
+        ${randomUUID()},
+        ${this.ctx.network},
+        ${this.ctx.contractId},
+        ${this.config.indexer.startLedger},
+        NOW()
+      )
+      ON CONFLICT ("network", "contractId") DO NOTHING
+    `;
+    return this.prisma.indexerCursor.findUniqueOrThrow({ where: { cursor_stream: this.ctx } });
   }
 
   async status(): Promise<IndexerStatus> {
