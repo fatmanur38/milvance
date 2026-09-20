@@ -21,10 +21,10 @@ import { formatUsdcUnits } from '@/lib/domain/amounts';
  */
 
 const NODES: Record<Party, { x: number; y: number; label: string; sub: string }> = {
-  buyer: { x: 105, y: 128, label: 'Buyer', sub: 'source of protected money' },
-  escrow: { x: 400, y: 128, label: 'MilvanceCore', sub: 'buyer money locked here' },
-  supplier: { x: 695, y: 128, label: 'Supplier', sub: 'receives working capital' },
-  funder: { x: 105, y: 305, label: 'Funder', sub: 'separate capital at risk' },
+  buyer: { x: 105, y: 128, label: 'Buyer', sub: 'protects the payment' },
+  escrow: { x: 400, y: 128, label: 'MilvanceCore', sub: 'buyer money locked' },
+  supplier: { x: 695, y: 128, label: 'Supplier', sub: 'receives the advance' },
+  funder: { x: 105, y: 305, label: 'Funder', sub: 'uses separate capital' },
 };
 
 const ROLE_EXPLANATION: Record<Party, string> = {
@@ -97,19 +97,20 @@ export function TradeFlow({
   };
 
   return (
-    <section aria-label="Interactive Testnet trade replay" className="flex flex-col gap-4">
+    <section aria-label="Interactive Testnet trade replay" className="flex min-w-0 flex-col gap-4">
       <div
-        className="overflow-hidden rounded-3xl border border-slate-700 shadow-2xl"
+        className="min-w-0 overflow-hidden rounded-3xl border border-slate-700 shadow-2xl"
         style={{
           background: 'radial-gradient(circle at 48% 38%, #243858 0%, #111d32 48%, #0b1323 100%)',
           color: '#e2e8f0',
         }}
       >
         <div className="flex items-center justify-between gap-3 px-5 pt-4 text-xs">
-          <span className="font-semibold uppercase tracking-[0.18em] text-sky-200">
-            Real Testnet event replay
+          <span className="min-w-0 font-semibold uppercase tracking-[0.18em] text-sky-200">
+            <span className="sm:hidden">Testnet replay</span>
+            <span className="hidden sm:inline">Real Testnet event replay</span>
           </span>
-          <span className="rounded-full border border-slate-600 px-3 py-1 tabular-nums text-slate-300">
+          <span className="shrink-0 whitespace-nowrap rounded-full border border-slate-600 px-3 py-1 tabular-nums text-slate-300">
             {index + 1} / {frames.length}
           </span>
         </div>
@@ -176,7 +177,7 @@ export function TradeFlow({
             </path>
           ))}
 
-          <text x="250" y="103" textAnchor="middle" fill="#9bbcff" fontSize="12">
+          <text x="250" y="66" textAnchor="middle" fill="#9bbcff" fontSize="12">
             BUYER PROTECTION
           </text>
           <text x="410" y="376" textAnchor="middle" fill="#72e7b5" fontSize="12">
@@ -218,13 +219,15 @@ export function TradeFlow({
                 type="button"
                 aria-pressed={focusedParty === party}
                 onClick={() => setFocusedParty((current) => (current === party ? null : party))}
-                className="min-h-28 rounded-xl border bg-slate-900 p-3 text-left"
+                className="min-h-28 min-w-0 rounded-xl border bg-slate-900 p-2 text-left min-[360px]:p-3"
                 style={{ borderColor: frame.active.includes(party) ? colour : '#475569' }}
               >
-                <span className="block text-sm font-semibold">{NODES[party].label}</span>
+                <span className="block break-words text-xs font-semibold min-[360px]:text-sm">
+                  {party === 'escrow' ? 'Milvance' : NODES[party].label}
+                </span>
                 <span className="block text-[11px] text-slate-400">{NODES[party].sub}</span>
-                <strong className="mt-3 block text-base tabular-nums">
-                  {balance ? formatUsdcUnits(balance.amount) + ' USDC' : 'Starts the payment'}
+                <strong className="mt-3 block break-words text-sm tabular-nums min-[360px]:text-base">
+                  {balance ? formatUsdcUnits(balance.amount) + ' USDC' : 'Funds the milestone'}
                 </strong>
               </button>
             );
@@ -262,13 +265,15 @@ export function TradeFlow({
             frame.transfers.map((transfer, position) => (
               <span
                 key={frame.stepId + '-transfer-' + position}
-                className="inline-flex items-center gap-2"
+                className="inline-flex min-w-0 flex-wrap items-center gap-2"
               >
                 <span
                   className="h-2.5 w-2.5 rounded-full"
                   style={{ background: POOL_COLOUR[transfer.pool] }}
                 />
-                <strong className="tabular-nums">{formatUsdcUnits(transfer.amount)} USDC</strong>
+                <strong className="break-all tabular-nums">
+                  {formatUsdcUnits(transfer.amount)} USDC
+                </strong>
                 <span className="text-slate-400">
                   {NODES[transfer.from].label} → {NODES[transfer.to].label}
                 </span>
@@ -372,6 +377,7 @@ function Node({
 }) {
   const node = NODES[party];
   const filled = balance === null ? 0 : Number((BigInt(balance.amount) * 134n) / scale);
+  const amountLabel = balance === null ? null : `${formatUsdcUnits(balance.amount)} USDC`;
   const colour =
     party === 'buyer' || party === 'escrow' ? POOL_COLOUR.protected : POOL_COLOUR.advance;
   const metricLabel =
@@ -424,8 +430,16 @@ function Node({
           <text x={-69} y={17} fill="#9baec5" fontSize={9} letterSpacing={1.2}>
             {metricLabel}
           </text>
-          <text x={-69} y={36} fill="#ffffff" fontSize={17} fontWeight={700}>
-            {formatUsdcUnits(balance.amount)} USDC
+          <text
+            x={-69}
+            y={36}
+            fill="#ffffff"
+            fontSize={17}
+            fontWeight={700}
+            textLength={amountLabel !== null && amountLabel.length > 13 ? 134 : undefined}
+            lengthAdjust="spacingAndGlyphs"
+          >
+            {amountLabel}
           </text>
           <rect x={-69} y={40} width={134} height={4} rx={2} fill="#34465e" />
           <rect
@@ -441,7 +455,7 @@ function Node({
       )}
       {balance === null && (
         <text x={-69} y={32} fill="#b7c6d8" fontSize={12}>
-          Starts the protected payment
+          Funds the milestone
         </text>
       )}
     </g>

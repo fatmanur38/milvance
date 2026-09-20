@@ -76,8 +76,8 @@ export function GuidedTour() {
   const step = steps[activeIndex];
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.85fr)]">
+    <div className="flex min-w-0 flex-col gap-6">
+      <div className="grid min-w-0 items-start gap-5 xl:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.85fr)]">
         <TradeFlow steps={steps} index={activeIndex} onIndexChange={setIndex} />
         {step !== undefined && <StepDetail step={step} number={activeIndex + 1} />}
       </div>
@@ -160,7 +160,7 @@ const THEME_LABELS: Record<TourStep['theme'], string> = {
  */
 function StepDetail({ step, number }: { step: TourStep; number: number }) {
   return (
-    <Card className="flex flex-col gap-5 xl:min-h-[480px]" data-testid="tour-step">
+    <Card className="flex min-w-0 flex-col gap-5 xl:min-h-[480px]" data-testid="tour-step">
       <div className="flex items-center justify-between gap-2">
         <Badge tone="neutral">{THEME_LABELS[step.theme]}</Badge>
         <span className="text-xs font-semibold uppercase tracking-wider text-muted">
