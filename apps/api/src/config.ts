@@ -34,6 +34,21 @@ export interface IndexerConfig {
   readonly pollIntervalSeconds: number;
 }
 
+/**
+ * Credentials for S3-compatible object storage.
+ *
+ * Server-side only. None of these may ever be exposed through a `NEXT_PUBLIC_*`
+ * variable: the browser uploads evidence to the API, and the API is the only
+ * thing that can reach the bucket.
+ */
+export interface S3Config {
+  readonly endpoint: string;
+  readonly bucket: string;
+  readonly region: string;
+  readonly accessKeyId: string;
+  readonly secretAccessKey: string;
+}
+
 export interface EvidenceConfig {
   /** `local-dev` writes to a directory; `s3` talks to S3-compatible storage. */
   readonly driver: 'local-dev' | 's3';
@@ -41,6 +56,8 @@ export interface EvidenceConfig {
   readonly maxBytes: number;
   readonly endpoint: string | undefined;
   readonly bucket: string | undefined;
+  /** Present only when the driver is `s3`. */
+  readonly s3: S3Config | undefined;
 }
 
 export interface ApiConfig {
@@ -176,6 +193,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       ),
       endpoint: optional(env, 'OBJECT_STORAGE_ENDPOINT'),
       bucket: optional(env, 'OBJECT_STORAGE_BUCKET'),
+      s3:
+        driver === 's3'
+          ? {
+              endpoint: required(env, 'OBJECT_STORAGE_ENDPOINT'),
+              bucket: required(env, 'OBJECT_STORAGE_BUCKET'),
+              // R2 ignores the region but still requires one in the signature.
+              region: optional(env, 'OBJECT_STORAGE_REGION') ?? 'auto',
+              accessKeyId: required(env, 'OBJECT_STORAGE_ACCESS_KEY'),
+              secretAccessKey: required(env, 'OBJECT_STORAGE_SECRET_KEY'),
+            }
+          : undefined,
     },
   };
 }

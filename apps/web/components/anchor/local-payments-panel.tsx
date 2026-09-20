@@ -34,7 +34,9 @@ import {
   planWithdrawalPayment,
   submitSignedPayment,
 } from '@/lib/anchor/payment';
+import { buildLocalPaymentLeg } from '@/lib/anchor/record';
 import { activeSession, clearSession, storeSession } from '@/lib/anchor/session';
+import { api } from '@/lib/api/queries';
 import { canSign } from '@/lib/wallet/controller';
 import { useWallet } from '@/lib/wallet/provider';
 
@@ -85,6 +87,7 @@ export function LocalPaymentsPanel({
   const [paymentHash, setPaymentHash] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [recorded, setRecorded] = useState<'saved' | 'skipped' | null>(null);
 
   // Discovery needs no wallet: it is how we learn what this provider offers.
   useEffect(() => {
@@ -101,6 +104,43 @@ export function LocalPaymentsPanel({
     const timer = setInterval(tick, 1_000);
     return () => clearInterval(timer);
   }, [quote]);
+
+  /**
+   * Records a finished leg so traction can connect local money to chain money.
+   *
+   * Deliberately best-effort: the conversion already happened on Stellar and at
+   * the Anchor, and failing to write an analytics row must never be presented
+   * as a failed payment. What it records is a claim — the API checks the hash
+   * against Horizon before it counts for anything.
+   */
+  const recordLeg = useCallback(
+    async (
+      finished: AnchorTransaction,
+      kind: Direction,
+      wallet: string,
+      submittedPaymentHash: string | null,
+      sentAmount: string | null,
+    ) => {
+      const built = buildLocalPaymentLeg({
+        transfer: finished,
+        direction: kind,
+        walletAddress: wallet,
+        submittedPaymentHash,
+        sentAmount,
+      });
+      if (!built.ok) {
+        setRecorded('skipped');
+        return;
+      }
+      try {
+        await api.recordLocalPayment(built.leg);
+        setRecorded('saved');
+      } catch {
+        setRecorded('skipped');
+      }
+    },
+    [],
+  );
 
   const run = useCallback(async (label: string, task: () => Promise<void>) => {
     setBusy(label);
@@ -192,15 +232,15 @@ export function LocalPaymentsPanel({
         transactionId: transfer.id,
         amount,
       });
-      setTransfer(
-        await pollTransfer(
-          (id, s, c) => anchorProvider.getTransaction(id, s, c),
-          transfer.id,
-          session,
-          capabilities,
-          { onUpdate: setTransfer },
-        ),
+      const finished = await pollTransfer(
+        (id, s, c) => anchorProvider.getTransaction(id, s, c),
+        transfer.id,
+        session,
+        capabilities,
+        { onUpdate: setTransfer },
       );
+      setTransfer(finished);
+      if (address !== null) await recordLeg(finished, 'deposit', address, null, null);
       await controller.refresh();
     });
 
@@ -229,15 +269,17 @@ export function LocalPaymentsPanel({
       const hash = await submitSignedPayment(signed);
       setPaymentHash(hash);
 
-      setTransfer(
-        await pollTransfer(
-          (id, s, c) => anchorProvider.getTransaction(id, s, c),
-          created.id,
-          session,
-          capabilities,
-          { onUpdate: setTransfer },
-        ),
+      const finished = await pollTransfer(
+        (id, s, c) => anchorProvider.getTransaction(id, s, c),
+        created.id,
+        session,
+        capabilities,
+        { onUpdate: setTransfer },
       );
+      setTransfer(finished);
+      // The hash we submitted ourselves is the strongest evidence available:
+      // we know exactly which payment settled this withdrawal.
+      await recordLeg(finished, 'withdraw', address, hash, plan.amount);
       await controller.refresh();
     });
 
@@ -248,6 +290,7 @@ export function LocalPaymentsPanel({
     setQuote(null);
     setTransfer(null);
     setPaymentHash(null);
+    setRecorded(null);
   };
 
   const sessionLive = signedIn && activeSession() !== null;
@@ -484,6 +527,23 @@ export function LocalPaymentsPanel({
               View the Stellar settlement
             </a>
           )}
+          {recorded !== null && (
+            <div className="text-xs opacity-70">
+              {recorded === 'saved' ? (
+                <>
+                  Recorded as a local-payment leg. The {anchorConfig.localCurrency} side stays the
+                  provider&rsquo;s word; the Stellar side is checked against Horizon before it
+                  counts towards any metric.
+                </>
+              ) : (
+                <>
+                  Not recorded for metrics — nothing was missing from your conversion, only the
+                  bookkeeping entry. The money moved exactly as shown above.
+                </>
+              )}
+            </div>
+          )}
+
           {transfer.externalTransactionId && (
             <div className="opacity-70">
               Payout reference <code className="text-xs">{transfer.externalTransactionId}</code>

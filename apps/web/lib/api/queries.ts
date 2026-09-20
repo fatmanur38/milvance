@@ -16,9 +16,11 @@ import {
   orderWithMilestonesSchema,
   participantSchema,
   positionsSchema,
+  localPaymentRecordedSchema,
   publicMetricsSchema,
   readinessSchema,
 } from './schemas';
+import type { LocalPaymentLeg } from '../anchor/record';
 
 /**
  * Query keys, in one place.
@@ -66,6 +68,19 @@ export const api = {
     apiRequest(`/funding/positions?funder=${enc(funder)}&limit=200`, positionsSchema),
   activity: () => apiRequest('/activity?limit=100', activitySchema),
   publicMetrics: () => apiRequest('/metrics/public', publicMetricsSchema),
+  /**
+   * Records a finished local-payment leg.
+   *
+   * Public-safe metadata only, built by `buildLocalPaymentLeg` from an
+   * allowlist. Idempotent on the Anchor's transfer id, so a retry updates one
+   * row instead of inventing a second conversion.
+   */
+  recordLocalPayment: (leg: LocalPaymentLeg) =>
+    apiRequest('/local-payments', localPaymentRecordedSchema, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(leg),
+    }),
   readiness: () => apiRequest('/health/ready', readinessSchema),
   indexerStatus: () => apiRequest('/indexer/status', indexerStatusSchema),
   /** This wallet's own Trade Lab consent state. Consent metadata, never usage proof. */

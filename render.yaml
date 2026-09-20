@@ -1,0 +1,106 @@
+# Milvance deployment blueprint.
+#
+# Three services and one managed database. The web app is deployed separately
+# on Vercel (see vercel.json) because it is a Next.js app and that is where the
+# framework is best supported; everything stateful lives here.
+#
+# NO SECRET IS IN THIS FILE. Values marked `sync: false` are entered once in the
+# provider's dashboard and never enter the repository.
+#
+# The indexer is a worker, not a second web service: it must run continuously,
+# and it must never be scaled to two instances, because two writers advancing
+# one cursor is the one way this design can double-count.
+
+databases:
+  - name: milvance-db
+    databaseName: milvance
+    user: milvance
+    plan: basic-256mb
+    postgresMajorVersion: '16'
+
+services:
+  # ---------------------------------------------------------------- API ----
+  - type: web
+    name: milvance-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /api/health/live
+    # Migrations run before the new process serves traffic. `migrate deploy`
+    # only applies pending migrations — it never resets or drops anything.
+    preDeployCommand: pnpm --filter @milvance/api db:migrate
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: '3001'
+      - key: DATABASE_URL
+        fromDatabase:
+          name: milvance-db
+          property: connectionString
+      - key: WEB_URL
+        sync: false # the public web origin, e.g. https://milvance.vercel.app
+      - key: STELLAR_NETWORK
+        value: testnet
+      - key: STELLAR_NETWORK_PASSPHRASE
+        value: Test SDF Network ; September 2015
+      - key: STELLAR_RPC_URL
+        value: https://soroban-testnet.stellar.org
+      - key: STELLAR_HORIZON_URL
+        value: https://horizon-testnet.stellar.org
+      - key: MILVANCE_CONTRACT_ID
+        value: CCN6AZHLN2BQPCDZWXJGA3NRJEJ56V5JK3M4VZ5QFKQ3NSJBN6RVTKRX
+      - key: USDC_ISSUER
+        value: GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5
+      - key: USDC_ASSET_CONTRACT_ID
+        value: CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA
+      - key: ANCHOR_HOME_DOMAIN
+        value: tr-mock-anchor.fly.dev
+      # Evidence: persistent object storage, so documents survive a redeploy.
+      - key: EVIDENCE_STORAGE_DRIVER
+        value: s3
+      - key: OBJECT_STORAGE_ENDPOINT
+        sync: false
+      - key: OBJECT_STORAGE_BUCKET
+        sync: false
+      - key: OBJECT_STORAGE_REGION
+        value: auto
+      - key: OBJECT_STORAGE_ACCESS_KEY
+        sync: false
+      - key: OBJECT_STORAGE_SECRET_KEY
+        sync: false
+
+  # ------------------------------------------------------------ INDEXER ----
+  - type: worker
+    name: milvance-indexer
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    # Exactly one instance, always. See the note at the top of this file.
+    numInstances: 1
+    dockerCommand: node apps/api/dist/indexer/indexer.main.js watch
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: milvance-db
+          property: connectionString
+      - key: STELLAR_NETWORK
+        value: testnet
+      - key: STELLAR_RPC_URL
+        value: https://soroban-testnet.stellar.org
+      - key: STELLAR_HORIZON_URL
+        value: https://horizon-testnet.stellar.org
+      - key: MILVANCE_CONTRACT_ID
+        value: CCN6AZHLN2BQPCDZWXJGA3NRJEJ56V5JK3M4VZ5QFKQ3NSJBN6RVTKRX
+      - key: USDC_ISSUER
+        value: GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5
+      - key: USDC_ASSET_CONTRACT_ID
+        value: CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA
+      # The ledger MilvanceCore was deployed in. A fresh database backfills the
+      # entire history from here rather than starting at "now" and losing it.
+      - key: INDEXER_START_LEDGER
+        value: '4760607'
+      - key: INDEXER_POLL_SECONDS
+        value: '10'

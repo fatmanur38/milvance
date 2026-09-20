@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+target
+.git
+.env
+.env.*
+.evidence-store
+# Private development constitution — never enters an image or a registry.
+AGENT.md
+AGENTS.md
+MILVANCE_SSOT*.md

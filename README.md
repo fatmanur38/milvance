@@ -9,9 +9,16 @@
 
 ---
 
-> **Repository status:** The Phase 1 Soroban core, Freighter wallet flow, and
-> TRY ↔ USDC Anchor flow are live on Stellar Testnet. PKG-08 adds the PostgreSQL
-> read layer and event indexer. Product UI packages follow in the roadmap.
+## Try it
+
+|                   |                                                                                                                                                     |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Live app**      | _see [Live deployment](#live-deployment)_                                                                                                           |
+| **Contract**      | [`CCN6AZHL…TKRX`](https://stellar.expert/explorer/testnet/contract/CCN6AZHLN2BQPCDZWXJGA3NRJEJ56V5JK3M4VZ5QFKQ3NSJBN6RVTKRX) on Stellar **Testnet** |
+| **You need**      | [Freighter](https://freighter.app) set to Testnet. Nothing else — no signup, no key shared with us.                                                 |
+| **5-minute tour** | [Demo runbook](docs/DEMO_RUNBOOK.md)                                                                                                                |
+
+Everything runs on Testnet with test USDC. No real money moves at any point.
 
 ---
 
@@ -73,6 +80,49 @@ optional withdrawal button.
 Soroban cannot independently know that goods were manufactured, loaded, shipped or
 delivered. An authorized attestor establishes that. Milvance is not trustless
 physical-world verification, and a finance position is not risk-free.
+
+## The five roles
+
+| Role         | Does                                                            | Touches money                                           |
+| ------------ | --------------------------------------------------------------- | ------------------------------------------------------- |
+| **Buyer**    | Creates the order, protects each milestone payment, can dispute | Yes — into escrow                                       |
+| **Supplier** | Accepts the order, requests financing, submits evidence         | Yes — receives the advance and the settlement remainder |
+| **Funder**   | Offers financing and advances their own USDC                    | Yes — pays the supplier, is repaid first                |
+| **Attestor** | Checks evidence against what was promised and verifies on chain | No                                                      |
+| **Resolver** | Decides a disputed milestone: settle or refund                  | No                                                      |
+
+The contract enforces that a funder is independent of all four other parties,
+and that only the named attestor and resolver can act in their roles. A role
+named in a URL grants nothing — permissions come from the addresses stored on
+the order and are re-checked when a transaction is signed.
+
+## Evidence
+
+A supplier's document never goes on chain. The browser hashes the file, the
+bytes go to private object storage, and the supplier's **wallet** commits the
+32-byte SHA-256 to Soroban. The attestor retrieves the document, sees the
+matching fingerprint, and decides.
+
+That proves the attestor read exactly the bytes that were committed. It proves
+nothing about whether the document is honest — the attestor's judgement is the
+trust boundary, and [the threat model](docs/THREAT_MODEL.md) says so plainly.
+
+## Where the numbers come from
+
+Every figure on the traction page carries its own definition and provenance,
+served by the API next to the value:
+
+| Provenance                    | Meaning                                                                           |
+| ----------------------------- | --------------------------------------------------------------------------------- |
+| **On chain**                  | Projected from MilvanceCore events; rebuildable from Stellar                      |
+| **Anchor-reported**           | A provider's word. No blockchain can prove a bank transfer.                       |
+| **Reported, Stellar-checked** | A report whose Stellar leg Horizon confirms — asset, direction, wallet and amount |
+| **Self-declared**             | A wallet owner's statement about themselves                                       |
+
+Protocol activity includes our own demo wallets and says so. External adoption
+counts only wallets whose owners opted in and declared themselves outside the
+team — nothing is inferred from behaviour, so that number is honestly zero
+until someone outside the team uses Milvance. See [public metrics](docs/METRICS.md).
 
 ---
 
@@ -141,6 +191,51 @@ transaction; users continue to authorize financial actions in their wallets.
 - Raw evidence documents stay off-chain; only a SHA-256 commitment goes on-chain.
 - A missed deadline alone never moves funds.
 
+## Deploying it
+
+`Dockerfile`, `render.yaml` and `apps/web/vercel.json` describe the whole
+deployment: web on Vercel, API and indexer as two processes from one container
+image on Render, managed PostgreSQL, and a **private** S3-compatible bucket for
+evidence. No secret is in any of those files.
+
+```bash
+pnpm --filter @milvance/api db:migrate   # prisma migrate deploy — never resets
+pnpm --filter @milvance/api indexer watch # continuous, exactly one instance
+pnpm --filter @milvance/api cycles verify # confirm Anchor legs against Horizon
+```
+
+Full instructions, every environment variable, and which ones are secret:
+[deployment guide](docs/DEPLOYMENT.md).
+
+## Known limitations
+
+Stated here rather than buried, because a submission that hides these is worse
+than one that does not have them:
+
+- **Testnet only.** Test USDC, and a mock Anchor that simulates KYC and the bank
+  leg. No real money moves.
+- **Attestation is human.** Milvance does not verify physical goods. The
+  contract enforces _who_ decides, not whether they decided correctly.
+- **A refund does not reverse a funder's advance.** The supplier keeps it; the
+  funder's remaining claim is off-chain. The funder takes supplier performance
+  risk, and buyer escrow is not a guarantee to them.
+- **An on-chain position is not a legal receivable assignment** without a legal
+  wrapper in the relevant jurisdictions.
+- **Non-custodial does not mean unregulated.** Holding no keys removes custody
+  risk, not money-transmission or lending obligations.
+- **No external users yet.** The traction page reports zero, because that is
+  true.
+- **No partial settlement**, no attestor rotation, no appeal beyond the named
+  resolver.
+
+## Stellar tooling used
+
+Soroban SDK 28 (Rust) · Stellar CLI 28 · `@stellar/stellar-sdk` 16 · Stellar
+Wallets Kit with Freighter · generated contract bindings from the deployed
+contract spec · Soroban RPC `getEvents` for indexing · Horizon for payment
+verification · SEP-1 discovery, SEP-10 authentication, SEP-38 quotes and SEP-6
+transfers for the Anchor · Stellar Asset Contract for USDC.
+
 ## Roadmap to submission
 
 | Phase | Package(s)     | Scope                                            | Status  |
@@ -150,15 +245,17 @@ transaction; users continue to authorize financial actions in their wallets.
 | 2     | PKG-05, PKG-06 | Testnet deployment, Stellar Wallets Kit          | ✅ done |
 | 3     | PKG-07         | Anchor / local payments (TRY ↔ USDC)             | ✅ done |
 | 4     | PKG-08         | API, PostgreSQL read models, Soroban indexer     | ✅ done |
-| 5     | PKG-09…PKG-11  | Product UI, Trade Lab, public traction dashboard | ⬜      |
-| 6     | PKG-12         | Hardening, documentation, demo, submission       | ⬜      |
+| 5     | PKG-09…PKG-11  | Product UI, Trade Lab, public traction dashboard | ✅ done |
+| 6     | PKG-12         | Hardening, documentation, demo, submission       | ✅ done |
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md) — _TBD_
-- [Threat model](docs/THREAT_MODEL.md) — _TBD_
-- [Demo runbook](docs/DEMO_RUNBOOK.md) — _TBD_
-- [Product narrative](docs/PRODUCT_NARRATIVE.md) — _TBD_
+- [Product narrative](docs/PRODUCT_NARRATIVE.md) — the problem, the users, why Stellar
+- [Architecture](docs/ARCHITECTURE.md) — how the pieces fit and who is authoritative
+- [Threat model](docs/THREAT_MODEL.md) — what is enforced, what is trusted, what is accepted
+- [Demo runbook](docs/DEMO_RUNBOOK.md) — the 5-minute script and its recovery paths
+- [Deployment](docs/DEPLOYMENT.md) — public deployment, environment, migrations
+- [Submission](docs/SUBMISSION.md) — the short version for judges
 - [Product workspace](docs/PRODUCT_WORKSPACE.md)
 - [Trade Lab](docs/TRADE_LAB.md)
 - [Local payments (Anchor)](docs/ANCHOR_LOCAL_PAYMENTS.md)

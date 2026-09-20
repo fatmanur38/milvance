@@ -169,16 +169,37 @@ export class LocalPaymentsController {
         : {}),
     };
 
+    // Re-posting the same transfer id updates one row rather than creating a
+    // second conversion, so a browser retry cannot inflate local-payment counts.
+    const identity = {
+      network: data.network,
+      anchorDomain: data.anchorDomain,
+      anchorTransactionId,
+    };
+    const existing = await this.prisma.anchorTransaction.findUnique({
+      where: { anchor_transfer_identity: identity },
+      select: { stellarTxHash: true },
+    });
+    // A corrected hash invalidates whatever Stellar previously said about the
+    // old one. Leaving a stale verdict attached would let a wrong hash keep a
+    // CONFIRMED badge — or keep a corrected one permanently MISMATCHED.
+    const hashChanged =
+      stellarTxHash !== null && existing != null && existing.stellarTxHash !== stellarTxHash;
     const row = await this.prisma.anchorTransaction.upsert({
-      where: {
-        anchor_transfer_identity: {
-          network: data.network,
-          anchorDomain: data.anchorDomain,
-          anchorTransactionId,
-        },
-      },
+      where: { anchor_transfer_identity: identity },
       create: data,
-      update: { status, ...(stellarTxHash !== null ? { stellarTxHash } : {}) },
+      update: {
+        status,
+        ...(stellarTxHash !== null ? { stellarTxHash } : {}),
+        ...(hashChanged
+          ? {
+              stellarLegStatus: 'UNCHECKED' as const,
+              stellarLegDetail: null,
+              stellarLegCheckedAt: null,
+              stellarLegAt: null,
+            }
+          : {}),
+      },
     });
 
     return {

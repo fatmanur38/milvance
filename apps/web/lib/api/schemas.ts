@@ -367,6 +367,15 @@ export const publicMetricsSchema = z.object({
   }),
 });
 
+/** What the API says after recording a local-payment leg. */
+export const localPaymentRecordedSchema = z.object({
+  recorded: z.boolean(),
+  verification: z.string(),
+  id: z.string(),
+  direction: z.enum(['TRY_TO_USDC', 'USDC_TO_TRY']),
+  status: z.string(),
+});
+
 export type Order = z.infer<typeof orderSchema>;
 export type Milestone = z.infer<typeof milestoneSchema>;
 export type OrderWithMilestones = z.infer<typeof orderWithMilestonesSchema>;
